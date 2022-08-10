@@ -291,8 +291,8 @@ class LearnGUI:
                 num_neg = len(neg_idx)
 
                 if num_pos == 0:
-                    print('skipping {}, {} because no positive examples'.format(
-                        filename, color))
+                    print('skipping color {} for image {} because no positive examples'.format(
+                        color, filename))
                     continue
 
                 pos_idx, pos_counts = np.unique(pos_idx, return_counts=True)
@@ -313,7 +313,7 @@ class LearnGUI:
             print('color {} has {} pos, {} neg'.format(color, num_pos, num_neg))
             
             if num_pos == 0:
-                print('skipping color {} because no positive examples'.format(color))
+                print('skipping color {} because no samples'.format(color))
                 continue
 
             w_pos = POS_WEIGHT / num_pos
@@ -378,9 +378,10 @@ class LearnGUI:
         print()
                 
         for cidx, color in enumerate(self.colors):
+
             if total_count[cidx] == 0:
-                print('skipping color {} because no samples'.format(color))
                 continue
+
             error = total_error[cidx] / total_count[cidx]
             print('error for color {} is {:.7f}'.format(color, error))
 
