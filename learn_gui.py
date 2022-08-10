@@ -1,5 +1,11 @@
 from __future__ import print_function
 
+# TODO:
+#  - spit out blobfinder2 data file
+#  - random train/test split?
+#  - add noise for improved generalization? 
+#  - create file from command line
+#  - remove color from command line
 
 import sys
 import os
