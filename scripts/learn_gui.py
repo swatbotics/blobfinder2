@@ -1,11 +1,27 @@
 from __future__ import print_function
 
 # TODO:
+#  - create file from command line with named colors
+#  - blur then threshold?
 #  - spit out blobfinder2 data file
 #  - random train/test split?
 #  - add noise for improved generalization? 
-#  - create file from command line
 #  - remove color from command line
+#  - better interactive tools / bootstrapping
+#  - save last view in dot file?
+#
+# IN LAB:
+#  - green pylons are too dark with astra autoexposure
+#  - blue ball is probably OK with astra
+#  
+# UPDATED ROS NODE
+#  - just 4 topics:
+#    - debug_image
+#    - blobs
+#    - blobs3d
+#  - arg or param for colors
+#   - 
+#  
 
 import sys
 import os
@@ -46,6 +62,8 @@ TRUE_POS_COLOR = np.array([0, 127, 0], dtype=np.uint8)
 TRUE_NEG_COLOR = np.array([0, 0, 127], dtype=np.uint8)
 FALSE_POS_COLOR = np.array([0, 0, 255], dtype=np.uint8)
 FALSE_NEG_COLOR = np.array([0, 255, 0], dtype=np.uint8)
+
+PRED_BLUR_SIGMA = 1.4 # chosen to overfit to minimize error
 
 FONT_FACE = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.5
@@ -209,6 +227,20 @@ def roundtrip(img):
 
     #return img
 
+def cleanup(mask, sigma):
+
+    if sigma == 0.0:
+        return mask
+
+    #mask = np.where(mask, np.uint8(255), np.uint8(0))
+    mask = mask * 255
+
+    blur = cv2.GaussianBlur(mask, (0, 0), sigma)
+
+    return (blur > 127).view(np.uint8)
+
+    #mask = np.where(blur > 127, np.uint8(255), np.uint8(0))
+
     
 
 
@@ -347,6 +379,7 @@ class LearnGUI:
         for filename in self.images:
 
             img = cv2.imread(os.path.join(self.dirname, filename))
+
             indexed = to_indexed(img)
             all_pred = self.lut[indexed]
 
@@ -368,7 +401,9 @@ class LearnGUI:
                 w_pos = POS_WEIGHT / num_pos
                 w_neg = NEG_WEIGHT / num_neg
 
-                pred = ((all_pred >> cidx) & 1).astype(bool)
+                pred = ((all_pred >> cidx) & 1)
+
+                pred = cleanup(pred, PRED_BLUR_SIGMA).view(bool)
 
                 error = ( w_pos * (pos_mask & ~pred).sum() +
                           w_neg * (neg_mask & pred).sum() )
@@ -723,10 +758,13 @@ class LearnGUI:
 
         elif mode == 'classified' or mode == 'error':
 
+
             indexed = to_indexed(self.cur_image)
             all_pred = self.lut[indexed]
 
-            pred = ((all_pred >> self.cur_color_index) & 1).view(bool)
+            pred = ((all_pred >> self.cur_color_index) & 1)
+
+            pred = cleanup(pred, PRED_BLUR_SIGMA).view(bool)
             
             showme = np.full((h, w, 3), 127, dtype=np.uint8)
 
