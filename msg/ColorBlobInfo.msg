@@ -1,0 +1,2 @@
+String color
+BlobInfo[] blobs
