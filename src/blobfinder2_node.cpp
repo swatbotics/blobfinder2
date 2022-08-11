@@ -1,22 +1,21 @@
 // A node for 
 //
 // config/arguments:
-//   - input image (eg /camera/rgb/image_raw)
+//   - input image (eg /camera/bgr/image_raw)
 //   - dilation/erosion amount (default 1)
 //   - ROI (default whole window, otherwise x,y,w,h)
 //   - minimum blob size (default 1)
 //   - # blobs
 //
 // outputs
-//   - /blobfinder/color_foo/blobs
+//   - /blobfinder2/blobs
 //     - centroid, area, and principal component of each detected blob for color_foo
-//   - /blobfinder/color_foo/image
-//     - thresholded (and opened) image for each color
+//   - todo doc more
 
 
 #include "ros/ros.h"
-#include <blobfinder/MultiBlobInfo.h>
-#include <blobfinder/MultiBlobInfo3D.h>
+#include <blobfinder2/MultiBlobInfo.h>
+#include <blobfinder2/MultiBlobInfo3D.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -31,8 +30,10 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl_ros/point_cloud.h>
 
+const double MASK_BLUR_SIGMA = 1.4;
+
 using sensor_msgs::Image;
-using sensor_msgs::image_encodings::RGB8;
+using sensor_msgs::image_encodings::BGR8;
 using sensor_msgs::image_encodings::MONO8;
 
 using sensor_msgs::PointCloud2;
@@ -41,7 +42,7 @@ using sensor_msgs::PointField;
 //////////////////////////////////////////////////////////////////////
 // We will define a class later to handle each color separately.
 
-class ColorHandler;
+//class ColorHandler;
 
 //////////////////////////////////////////////////////////////////////
 // Helper for point cloud messages
@@ -114,14 +115,17 @@ public:
 //////////////////////////////////////////////////////////////////////
 // Class for sending color blob messages
 
-class BlobFinder {
+class BlobFinder2 {
 public:
 
   // node handle for this node
   ros::NodeHandle nh;
 
   // lookup table being used
-  ColorLUT lut;   
+  ColorLUT lut;
+
+  // mean colors per channel
+  cv::Vec3b mean_colors[ColorLUT::numcolors];
 
   // structuring element for morphological opening 
   cv::Mat strel; 
@@ -147,11 +151,21 @@ public:
   // subscription for points
   ros::Subscriber points_sub;
 
-  // handler for each color
-  std::vector<ColorHandler*> handlers;
+  // counters for various subscribers
+  size_t num_blobs_subscribers;
+  size_t num_blobs3d_subscribers;
+  size_t num_colorflags_subscribers;
+  size_t num_debug_image_subscribers;
+
+  // publishers for outputs
+  ros::Publisher blobs_pub;
+  ros::Publisher blobs3d_pub;
+  ros::Publisher colorflags_pub;
+  ros::Publisher debug_image_pub;
+
 
   // constructor
-  BlobFinder();
+  BlobFinder2();
 
   // image callback
   void image_callback(const Image::ConstPtr& msg);
@@ -160,18 +174,22 @@ public:
   void points_callback(const PointCloud2::ConstPtr& msg);
 
   void setROI(int w, int h);
-  void process_image(const cv::Mat& image_rgb, 
+  void process_image(const cv::Mat& image_bgr, 
 		     const PointCloudHelper& pch=PointCloudHelper());
+
+  void subs_inc(size_t&, const ros::SingleSubscriberPublisher&);
+  void subs_dec(size_t&, const ros::SingleSubscriberPublisher&);
 
 };
 
+/*
 //////////////////////////////////////////////////////////////////////
-// Class for handling one color of a BlobFinder
+// Class for handling one color of a BlobFinder2
 
 class ColorHandler {
 public:
   
-  BlobFinder* parent;
+  BlobFinder2* parent;
 
   size_t cidx;
   
@@ -185,12 +203,12 @@ public:
   ros::Publisher image_pub;
   ros::Publisher blobs3d_pub;
 
-  ColorHandler(BlobFinder* b, size_t cidx);
+  ColorHandler(BlobFinder2* b, size_t cidx);
 
   void subs_inc(size_t&, const ros::SingleSubscriberPublisher& ssp);
   void subs_dec(size_t&, const ros::SingleSubscriberPublisher& ssp);
 
-  void get_pos3d(blobfinder::BlobInfo3D& b3d,
+  void get_pos3d(blobfinder2::BlobInfo3D& b3d,
 		 const PointCloudHelper& pch);
 
   void publish(const ros::Time& timestamp, 
@@ -201,7 +219,7 @@ public:
 
 //////////////////////////////////////////////////////////////////////
 
-ColorHandler::ColorHandler(BlobFinder* b, size_t c):
+ColorHandler::ColorHandler(BlobFinder2* b, size_t c):
   parent(b),
   cidx(c),
   active(false),
@@ -218,8 +236,8 @@ ColorHandler::ColorHandler(BlobFinder* b, size_t c):
 
   ros::NodeHandle& n = parent->nh;
 
-  blobs_pub = n.advertise<blobfinder::MultiBlobInfo>
-    ("/blobfinder/" + name + "/blobs", 100,
+  blobs_pub = n.advertise<blobfinder2::MultiBlobInfo>
+    ("/blobfinder2/" + name + "/blobs", 100,
      boost::bind(&ColorHandler::subs_inc, 
 		 boost::ref(*this), 
 		 boost::ref(num_blobs_subscribers), _1),
@@ -228,7 +246,7 @@ ColorHandler::ColorHandler(BlobFinder* b, size_t c):
 		 boost::ref(num_blobs_subscribers), _1));
 
   image_pub = n.advertise<sensor_msgs::Image>
-    ("/blobfinder/" + name + "/image", 100,
+    ("/blobfinder2/" + name + "/image", 100,
      boost::bind(&ColorHandler::subs_inc, 
 		 boost::ref(*this), 
 		 boost::ref(num_image_subscribers), _1),
@@ -237,8 +255,8 @@ ColorHandler::ColorHandler(BlobFinder* b, size_t c):
 		 boost::ref(num_image_subscribers), _1));
 
 
-  blobs3d_pub = n.advertise<blobfinder::MultiBlobInfo3D>
-    ("/blobfinder/" + name + "/blobs3d", 100,
+  blobs3d_pub = n.advertise<blobfinder2::MultiBlobInfo3D>
+    ("/blobfinder2/" + name + "/blobs3d", 100,
      boost::bind(&ColorHandler::subs_inc, 
 		 boost::ref(*this), 
 		 boost::ref(num_blobs3d_subscribers), _1),
@@ -260,7 +278,7 @@ void ColorHandler::subs_dec(size_t& count,
   if (count) { --count; }
 }
 
-void ColorHandler::get_pos3d(blobfinder::BlobInfo3D& b3d,
+void ColorHandler::get_pos3d(blobfinder2::BlobInfo3D& b3d,
 			     const PointCloudHelper& pch) {
 
   assert(pch.ok);
@@ -344,10 +362,10 @@ void ColorHandler::publish(const ros::Time& timestamp,
   
   if (num_blobs_subscribers || num_blobs3d_subscribers) {
     
-    blobfinder::MultiBlobInfo blobs_msg;
+    blobfinder2::MultiBlobInfo blobs_msg;
     blobs_msg.header.stamp = timestamp;
 
-    blobfinder::MultiBlobInfo3D blobs3d_msg;
+    blobfinder2::MultiBlobInfo3D blobs3d_msg;
     blobs3d_msg.header.stamp = timestamp;
     
     ColorLUT::RegionInfoVec regions;
@@ -367,7 +385,7 @@ void ColorHandler::publish(const ros::Time& timestamp,
       
       const ColorLUT::RegionInfo& rinfo = regions[i];
       
-      blobfinder::BlobInfo binfo;
+      blobfinder2::BlobInfo binfo;
       
       binfo.area = rinfo.area;
       
@@ -386,7 +404,7 @@ void ColorHandler::publish(const ros::Time& timestamp,
 
       if (num_blobs3d_subscribers && pch.ok) {
 	
-	blobfinder::BlobInfo3D binfo3d;
+	blobfinder2::BlobInfo3D binfo3d;
 	
 	binfo3d.blob = binfo;
 	get_pos3d(binfo3d, pch);
@@ -408,10 +426,11 @@ void ColorHandler::publish(const ros::Time& timestamp,
   }
 
 }
+*/
 
 //////////////////////////////////////////////////////////////////////
 
-BlobFinder::BlobFinder() {
+BlobFinder2::BlobFinder2() {
   
 
   int roi_x = 0;
@@ -425,16 +444,16 @@ BlobFinder::BlobFinder() {
   min_blob_area = 0;
   point_search_radius = 3;
 
-  nh.param("/blobfinder/roi_x", roi_x, roi_x);
-  nh.param("/blobfinder/roi_y", roi_y, roi_y);
-  nh.param("/blobfinder/roi_w", roi_w, roi_w);
-  nh.param("/blobfinder/roi_h", roi_h, roi_h);
-  nh.param("/blobfinder/open_size", open_size, open_size);
-  nh.param("/blobfinder/datafile", datafile, datafile);
-  nh.param("/blobfinder/max_blob_count", max_blob_count, max_blob_count);
-  nh.param("/blobfinder/min_blob_area", min_blob_area, min_blob_area);
-  nh.param("/blobfinder/use_points", use_points, use_points);
-  nh.param("/blobfinder/point_search_radius", point_search_radius, point_search_radius);
+  nh.param("/blobfinder2/roi_x", roi_x, roi_x);
+  nh.param("/blobfinder2/roi_y", roi_y, roi_y);
+  nh.param("/blobfinder2/roi_w", roi_w, roi_w);
+  nh.param("/blobfinder2/roi_h", roi_h, roi_h);
+  nh.param("/blobfinder2/open_size", open_size, open_size);
+  nh.param("/blobfinder2/datafile", datafile, datafile);
+  nh.param("/blobfinder2/max_blob_count", max_blob_count, max_blob_count);
+  nh.param("/blobfinder2/min_blob_area", min_blob_area, min_blob_area);
+  nh.param("/blobfinder2/use_points", use_points, use_points);
+  nh.param("/blobfinder2/point_search_radius", point_search_radius, point_search_radius);
 
   int sz = 2*open_size+1;
   
@@ -444,27 +463,76 @@ BlobFinder::BlobFinder() {
 
   first_image = true;
 
+  fprintf(stderr, "loading datafile %s...\n", datafile.c_str());
+
   lut.load(datafile);
 
+  lut.getMeanColors(mean_colors);
+
+  for (size_t cidx=0; cidx<ColorLUT::numcolors; ++cidx) {
+    if (lut.colornames[cidx] != "") {
+      const cv::Vec3b& mc = mean_colors[cidx];
+      fprintf(stderr, "mean color for %s is (%d, %d, %d)\n",
+	      lut.colornames[cidx].c_str(),
+	      int(mc[0]), int(mc[1]), int(mc[2]));
+    }
+  }
+
+  /*
   for (size_t i=0; i<ColorLUT::numcolors; ++i) {
     if (!(lut.colornames[i].empty())) {
       handlers.push_back(new ColorHandler(this, i));
     }
   }
+  */
+
+  num_blobs_subscribers = 0;
+  num_blobs3d_subscribers = 0;
+  num_colorflags_subscribers = 0;
+  num_debug_image_subscribers = 0;
+
+  blobs_pub = nh.advertise<blobfinder2::MultiBlobInfo>
+    ("/blobfinder2/blobs", 100,
+     boost::bind(&BlobFinder2::subs_inc,
+		 boost::ref(*this),
+		 boost::ref(num_blobs_subscribers), _1),
+     boost::bind(&BlobFinder2::subs_dec,
+		 boost::ref(*this),
+		 boost::ref(num_blobs_subscribers), _1));
+
+  colorflags_pub = nh.advertise<sensor_msgs::Image>
+    ("/blobfinder2/colorflags", 100,
+     boost::bind(&BlobFinder2::subs_inc,
+		 boost::ref(*this),
+		 boost::ref(num_colorflags_subscribers), _1),
+     boost::bind(&BlobFinder2::subs_dec,
+		 boost::ref(*this),
+		 boost::ref(num_colorflags_subscribers), _1));
+
+  debug_image_pub = nh.advertise<sensor_msgs::Image>
+    ("/blobfinder2/debug_image", 100,
+     boost::bind(&BlobFinder2::subs_inc,
+		 boost::ref(*this),
+		 boost::ref(num_debug_image_subscribers), _1),
+     boost::bind(&BlobFinder2::subs_dec,
+		 boost::ref(*this),
+		 boost::ref(num_debug_image_subscribers), _1));
 
   if (use_points) {
     points_sub = nh.subscribe("points", 4, 
-			      &BlobFinder::points_callback, this);
+			      &BlobFinder2::points_callback, this);
   } else {
     image_sub = nh.subscribe("image", 4, 
-			     &BlobFinder::image_callback, this);
+			     &BlobFinder2::image_callback, this);
   }
+
+  
   
 
 }
 
 
-void BlobFinder::setROI(int w, int h) {
+void BlobFinder2::setROI(int w, int h) {
 
   if (roi.x < 0) { roi.x = w + roi.x; }
   if (roi.y < 0) { roi.y = h + roi.y; }
@@ -488,66 +556,154 @@ void BlobFinder::setROI(int w, int h) {
   
 }
 
-  
+void BlobFinder2::subs_inc(size_t& count,
+			   const ros::SingleSubscriberPublisher& _) {
+  ++count;
+}
 
-void BlobFinder::process_image(const cv::Mat& image_rgb, 
+void BlobFinder2::subs_dec(size_t& count,
+			   const ros::SingleSubscriberPublisher& _) {
+  if (count) { --count; }
+}
+
+void BlobFinder2::process_image(const cv::Mat& image_bgr, 
 			       const PointCloudHelper& pch) {
 
-  if (image_rgb.empty()) { return; }
+  if (image_bgr.empty()) { return; }
 
   if (first_image) {
-    setROI(image_rgb.cols, image_rgb.rows);
+    setROI(image_bgr.cols, image_bgr.rows);
   }
 
-  cv::Mat image_yuv, colorflags;
+  if (num_blobs_subscribers == 0 &&
+      num_blobs3d_subscribers == 0 &&
+      num_debug_image_subscribers == 0 &&
+      num_colorflags_subscribers == 0) {
+    // TODO: pause image/points sub?
+    return;
+  }
 
-  cv::cvtColor(image_rgb, image_yuv, CV_RGB2YCrCb);
+  cv::Mat colorflags, cidx_mask, debug_mask, debug_image_bgr;
 
-  cv::Mat subimage(image_yuv, roi);
+  cv::Mat subimage(image_bgr, roi);
 
   lut.getImageColors(subimage, colorflags);
 
   ros::Time timestamp = ros::Time::now();
+    
+  if (num_colorflags_subscribers > 0) {
 
+    cv_bridge::CvImage cv_img;
+    cv_img.image = colorflags;
+    cv_img.encoding = MONO8;
+    sensor_msgs::ImagePtr msg = cv_img.toImageMsg();
+    msg->header.stamp = timestamp;
+
+    colorflags_pub.publish(msg);
+
+  }
+
+  if (num_blobs_subscribers == 0 &&
+      num_blobs3d_subscribers == 0 &&
+      num_debug_image_subscribers == 0) {
+    // TODO: pause image/points sub?
+    return;
+  }
+  
+  cidx_mask = cv::Mat(subimage.rows, subimage.cols, CV_8U);
+
+  if (num_debug_image_subscribers > 0) {
+    debug_mask = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8U);
+    debug_image_bgr = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
+  }
+  
+
+  for (size_t cidx=0; cidx<ColorLUT::numcolors; ++cidx) {
+
+    // get mask for this channel
+    lut.colorFlagsToMask(colorflags, cidx, cidx_mask);
+
+    // clean it up
+    cv::GaussianBlur(cidx_mask, cidx_mask,
+		     cv::Size(0, 0), MASK_BLUR_SIGMA);
+
+    // re-binarize after blur
+    cv::threshold(cidx_mask, cidx_mask,
+		  127, 255, cv::THRESH_BINARY);
+
+    if (num_debug_image_subscribers > 0) {
+
+      for (size_t y=0; y<cidx_mask.rows; ++y) {
+	for (size_t x=0; x<cidx_mask.cols; ++x) {
+
+	  if (cidx_mask.at<uint8_t>(y, x) && !debug_mask.at<uint8_t>(y, x)) {
+
+	    debug_mask.at<uint8_t>(y, x) = 255;
+	    debug_image_bgr.at<cv::Vec3b>(y, x) = mean_colors[cidx];
+
+	  }
+	  
+	}
+      }
+
+    }
+
+
+  }
+
+  if (num_debug_image_subscribers > 0) {
+
+    cv_bridge::CvImage cv_img;
+    cv_img.image = debug_image_bgr;
+    cv_img.encoding = BGR8;
+    sensor_msgs::ImagePtr msg = cv_img.toImageMsg();
+    msg->header.stamp = timestamp;
+
+    debug_image_pub.publish(msg);
+
+  }
+
+  /*
   for (size_t i=0; i<handlers.size(); ++i) {
     handlers[i]->publish(timestamp, colorflags, pch);
   }
+  */
 
 }
 
-void BlobFinder::image_callback(const Image::ConstPtr& msg) {
+void BlobFinder2::image_callback(const Image::ConstPtr& msg) {
 
-  cv::Mat image_rgb = cv_bridge::toCvCopy(msg, RGB8)->image;
+  cv::Mat image_bgr = cv_bridge::toCvCopy(msg, BGR8)->image;
 
-  process_image(image_rgb, 0);
+  process_image(image_bgr, 0);
 
 }
 
-void BlobFinder::points_callback(const PointCloud2::ConstPtr& msg) {
+void BlobFinder2::points_callback(const PointCloud2::ConstPtr& msg) {
 
   PointCloudHelper pch(msg.get());
 
   if (!pch.ok) { return; }
 
-  cv::Mat_<cv::Vec3b> image_rgb(msg->height, msg->width);
+  cv::Mat_<cv::Vec3b> image_bgr(msg->height, msg->width);
 
   for (size_t y=0; y<msg->height; ++y) {
     for (size_t x=0; x<msg->width; ++x) {
 
-      cv::Vec3b dst_rgb;
+      cv::Vec3b dst_bgr;
 
-      const unsigned char* src_rgb = pch.rgb(x,y);
+      const unsigned char* src_bgr = pch.rgb(x,y);
 
-      dst_rgb[2] = src_rgb[0];
-      dst_rgb[1] = src_rgb[1];
-      dst_rgb[0] = src_rgb[2];
+      dst_bgr[0] = src_bgr[0];
+      dst_bgr[1] = src_bgr[1];
+      dst_bgr[2] = src_bgr[2];
 
-      image_rgb(y,x) = dst_rgb;
+      image_bgr(y,x) = dst_bgr;
       
     }
   }
 
-  process_image(image_rgb, pch);
+  process_image(image_bgr, pch);
 
 
 }
@@ -556,9 +712,9 @@ void BlobFinder::points_callback(const PointCloud2::ConstPtr& msg) {
 
 int main(int argc, char** argv) {
 
-  ros::init(argc, argv, "blobfinder");
+  ros::init(argc, argv, "blobfinder2");
   
-  BlobFinder bf;
+  BlobFinder2 bf;
 
   ros::spin();
 

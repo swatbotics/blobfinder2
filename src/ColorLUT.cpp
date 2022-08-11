@@ -5,6 +5,12 @@
 #include <assert.h>
 
 enum {
+  bbits = ColorLUT::bbits,
+  gbits = ColorLUT::gbits,
+  rbits = ColorLUT::rbits,
+  bmask = (1 << ColorLUT::bbits) - 1,
+  gmask = (1 << ColorLUT::gbits) - 1,
+  rmask = (1 << ColorLUT::rbits) - 1,
   arraysize = 1 << (ColorLUT::bbits + ColorLUT::gbits + ColorLUT::rbits)
 };
 
@@ -42,12 +48,44 @@ static size_t downsample2index(const pixel& bgr) {
 
 }
 
+static pixel index2downsample(size_t index) {
+
+  size_t b = (index >> (ColorLUT::gbits + ColorLUT::rbits)) & bmask;
+  size_t g = (index >> (ColorLUT::rbits)) & gmask;
+  size_t r = index & rmask;
+
+  return pixel(b, g, r);
+
+}
+
+static void upsample(pixel& bgr) {
+
+  unsigned char& b = bgr[0];
+  unsigned char& g = bgr[1];
+  unsigned char& r = bgr[2];
+
+  b = (b << (8 - bbits)) + (1 << (7 - bbits));
+  g = (g << (8 - gbits)) + (1 << (7 - gbits));
+  r = (r << (8 - rbits)) + (1 << (7 - rbits));
+
+}
+
 static size_t pixel2index(pixel bgr) {
 
   downsample(bgr);
   return downsample2index(bgr);
 
 }
+
+static pixel index2pixel(size_t index) {
+
+  pixel bgr = index2downsample(index);
+  upsample(bgr);
+
+  return bgr;
+
+}
+
 
 void ColorLUT::save(const std::string& filename) const {
   
@@ -334,6 +372,51 @@ void ColorLUT::contourToRegionInfo(const PointVec& region,
     info.b1 = sqrt(W(0)) * cv::Point2d(U(0,0), U(1,0));
     info.b2 = sqrt(W(1)) * cv::Point2d(U(0,1), U(1,1));
     
+
+  }
+
+}
+
+void ColorLUT::getMeanColors(pixel mean_colors[numcolors]) const {
+
+  float accum[numcolors][3];
+  float count[numcolors];
+
+  for (int cidx=0; cidx<numcolors; ++cidx) {
+    for (int j=0; j<3; ++j) {
+      accum[cidx][j] = 0.0;
+    }
+    count[cidx] = 0.0;
+  }
+
+  for (int index=0; index<arraysize; ++index) {
+
+    colorflags cflags = lutdata[index];
+
+    pixel bgr = index2pixel(index);
+
+    for (int cidx=0; cidx<numcolors; ++cidx) {
+      if (cflags & (1 << cidx)) {
+
+	for (int j=0; j<3; ++j) {
+	  accum[cidx][j] += bgr[j];
+	}
+
+	count[cidx] += 1;
+
+      }
+    }
+  }
+
+  for (int cidx=0; cidx<numcolors; ++cidx) {
+
+    if (count[cidx] != 0) {
+      for (int j=0; j<3; ++j) {
+	mean_colors[cidx][j] = accum[cidx][j] / count[cidx];
+      }
+    } else {
+      mean_colors[cidx] = pixel(127, 127, 127);
+    }
 
   }
 

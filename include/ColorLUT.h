@@ -8,27 +8,15 @@
 /* Color lookup table (LUT) class for detecting blobs of constant
  * color using OpenCV.
  *
- * This class operates on 8-bit, 3-channel images in the YCrCb
- * colorspace.  If you have a source 8-bit RGB image image_rgb, you
- * can convert it into a YCrCb image like this:
- *
- *   cv::Mat image_ycrcb;
- *   cv::cvtColor(image_rgb, image_ycrcb, CV_RGB2YCrCb);
- *
- * The YCrCb colorspace is divided into "bins", each of which contains
- * multiple colors.  Typically, the Y (luminance) channel is
- * discretized more coarsely (fewer bins) than the Cr and Cb channels.
- * See the ybits and cbits enumerants for the number of bins. The
- * motivation here is that typically, colors with the same chrominance
- * (hue) but different luminance (brightness) are nonetheless
- * perceived by humans as the "same" color.
+ * The BGR colorspace is divided into "bins", each of which contains
+ * multiple colors. There are 2^16 = 65536 total bins. 
  *
  * This class a fixed number (see the numcolors enumerant) of named
  * colors.  Each color is represented by the set of bins it covers.
  * To add a color to a bin, you can call the addToColor method.
  *
  * Once colors have been added, you can call the getImageColors method
- * to convert a YCrCb image into a single channel image, where each
+ * to convert a BGR image into a single channel image, where each
  * pixel is a set of bitflags indicating which colors were matched at
  * each pixel. 
  *
@@ -221,6 +209,9 @@ public:
    */
   void getRegionInfo(const cv::Mat& mask, 
 		     RegionInfoVec& info) const;
+
+  /* Gets the mean of every color or (127, 127, 127) if empty. */
+  void getMeanColors(pixel mean_colors[numcolors]) const;
 
 };
 
