@@ -33,21 +33,14 @@ import json
 
 import re
 
-if False:
 
-    COLORSPACE = cv2.COLOR_BGR2YCrCb # -1 = none
-    COLORSPACE_INV = cv2.COLOR_YCrCb2BGR
-    CHAN_BITS = np.array([4, 6, 6]) 
-
-else:
-
-    COLORSPACE = -1
-    COLORSPACE_INV = -1
-    CHAN_BITS = np.array([5, 6, 5])
+CHAN_BITS = np.array([5, 6, 5])
 
 TOTAL_BITS = CHAN_BITS.sum()
 
 LUT_SIZE = (1 << TOTAL_BITS)
+
+MAX_COLORS = 8
 
 EXTENSIONS = ['.png', '.jpg']
 
@@ -170,9 +163,6 @@ def constrain(x0, x1, w, a0, a1):
 
 def to_indexed(img):
 
-    if COLORSPACE != -1:
-        img = cv2.cvtColor(img, COLORSPACE)
-
     h, w, nchan = img.shape
         
     assert nchan == len(CHAN_BITS)
@@ -212,9 +202,6 @@ def from_indexed(indexed):
 
         img[:, :, chan] = (((indexed >> rshift) & mask) << lshift) + offs
 
-    if COLORSPACE_INV != -1:
-        img = cv2.cvtColor(img, COLORSPACE_INV)
-    
     return img
         
 def roundtrip(img):
@@ -243,7 +230,6 @@ def cleanup(mask, sigma):
 
     #mask = np.where(blur > 127, np.uint8(255), np.uint8(0))
 
-    
 
 
 class LearnGUI:
@@ -279,6 +265,8 @@ class LearnGUI:
         self.load_data()
 
         self.train()
+
+        self.save_lut()
 
         h, w = max_dims
         self.display = np.zeros((h, w, 3), dtype=np.uint8)
@@ -900,6 +888,30 @@ class LearnGUI:
         with open(jsonfile, 'w') as ostr:
             ostr.write(outdata)
             ostr.write('\n')
+
+    def save_lut(self):
+
+        path = os.path.join(self.dirname, 'colorlut2.data')
+
+        with open(path, 'w') as ostr:
+
+            ostr.write('ColorLUT2 BGR\n')
+            for bits in CHAN_BITS:
+                ostr.write('{}\n'.format(bits))
+            ostr.write('{}\n'.format(MAX_COLORS)) # num colors
+
+            assert len(self.colors) <= MAX_COLORS
+
+            for color in self.colors:
+                ostr.write('{}\n'.format(color))
+                
+                
+            for _ in range(MAX_COLORS - len(self.colors)):
+                ostr.write('\n')
+
+            ostr.write(self.lut.tobytes())
+            
+        print('wrote', path)
 
     def get_rectangles(self, filename, color): # -> [pos, neg]
 

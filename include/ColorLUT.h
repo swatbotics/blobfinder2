@@ -43,18 +43,13 @@ public:
   /* Some helpful enumerants: */
   enum {
 
-    /* Number of bits used to represent the luminance channel. Note
-     * that if ybits = 4, then there are 16 levels of luminance bins.
+    /* Number of bits used to represent the blue, green, and red 
+     * channels. Note that if rbits = 4, then there are 16 levels of
+     * red.
      */
-    ybits = 4,
-
-    /* Number of bits used to represent each chrominance channel.
-     * Note that if cbits = 6, then there are 64 levels of Cr and Cb
-     * represented.  The total number of bins will be:
-     *
-     *   nbins = 2^ybits * 2^cbits * 2^cbits.
-     */
-    cbits = 6,
+    bbits = 5,
+    gbits = 6,
+    rbits = 5,
 
     /* The number of colors that can be tracked by the lookup table.
      * Note that 8 colors lets us represent all possible color
@@ -77,7 +72,7 @@ public:
    */
   typedef unsigned char colorflags;
 
-  /* A pixel in a YCrCb image is a vector of 3 unsigned characters. */
+  /* A pixel in a BGR image is a vector of 3 unsigned characters. */
   typedef cv::Vec3b pixel;
 
   /* Structure to track statistics of a connected component in a mask
@@ -133,8 +128,7 @@ public:
    * mean to also add the two adjacent bins above and below the
    * current bin in luminance).
    */
-  void addToColor(const pixel& YCrCb, size_t cidx,
-		  int yRange=0, int cRange=0);
+  void addToColor(const pixel& bgr, size_t cidx);
   
   /* Remove the bin containing the given pixel color from membership
    * in the color whose index is provided.  You can also optionally
@@ -142,13 +136,12 @@ public:
    * would mean to also remove the two adjacent bins above and below
    * the current bin in luminance).
    */
-  void removeFromColor(const pixel& YCrCb, size_t cidx,
-		       int yRange=0, int cRange=0);
+  void removeFromColor(const pixel& bgr, size_t cidx);
 
   /* Get the colors for which the bin containing the given pixel
    * color is a member. 
    */
-  colorflags getColors(const pixel& YCrCb) const;
+  colorflags getColors(const pixel& bgr) const;
 
   /* Remove all bins from membership in the color whose index is
    * provided. This is called automatically by removeFromColor.
@@ -179,7 +172,7 @@ public:
   /* Load an LUT from a file with the name provided. */
   void load(const std::string& filename);
 
-  /* This takes a YCrCb image as input and outputs a single-channel
+  /* This takes a BGR image as input and outputs a single-channel
    * colorflags image as output, where each pixel in the output has
    * bits corresponding to the color membership of the corresponding
    * input pixel.
@@ -197,7 +190,7 @@ public:
 			size_t cidx,
 			cv::Mat& mask) const;
 
-  /* This takes a YCrCb image and a color index as input and outputs a
+  /* This takes a BGR image and a color index as input and outputs a
    * single-channel mask image as output, where each pixel in the
    * output is non-zero if the corresponding input pixel was a member
    * of the color provided.  Note that since this internally calls

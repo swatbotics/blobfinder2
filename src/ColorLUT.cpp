@@ -5,9 +5,7 @@
 #include <assert.h>
 
 enum {
-  ycount = (1 << ColorLUT::ybits),
-  ccount = (1 << ColorLUT::cbits),
-  arraysize = ycount*ccount*ccount
+  arraysize = 1 << (ColorLUT::bbits + ColorLUT::gbits + ColorLUT::rbits)
 };
 
 typedef ColorLUT::pixel pixel;
@@ -16,42 +14,40 @@ ColorLUT::ColorLUT() {
   lutdata.resize(arraysize, 0);
 }
 
-static void downsample(pixel& YCrCb) {
+static void downsample(pixel& bgr) {
 
   // these guys are all 8 bits:
-  unsigned char& Y  = YCrCb[2];
-  unsigned char& Cr = YCrCb[1];
-  unsigned char& Cb = YCrCb[0];
-  /*Channels are downsampled by right-shifting 8 minus number of bits so that
-  the value has ybits or cbits places*/
-  Y =  (Y  >> (8-ColorLUT::ybits));
-  Cr = (Cr >> (8-ColorLUT::cbits));
-  Cb = (Cb >> (8-ColorLUT::cbits));
+  unsigned char& b = bgr[0];
+  unsigned char& g = bgr[1];
+  unsigned char& r = bgr[2];
+
+  /*Channels are downsampled by right-shifting 8 minus number of bits. */
+  b = (b  >> (8-ColorLUT::bbits));
+  g = (g >> (8-ColorLUT::gbits));
+  r = (r >> (8-ColorLUT::rbits));
 
 }
 
-static size_t downsample2index(const pixel& YCrCb) {
+static size_t downsample2index(const pixel& bgr) {
 
-  size_t Y  = YCrCb[2];
-  size_t Cr = YCrCb[1];
-  size_t Cb = YCrCb[0];
-  /*Concatenate the values in the form YCrCb by bit-shifting each value to make
+  size_t b = bgr[0];
+  size_t g = bgr[1];
+  size_t r = bgr[2];
+  /*Concatenate the values in the form bgr by bit-shifting each value to make
   room for the next and ORing them together	*/
 
-  return ( (Y << (ColorLUT::cbits + ColorLUT::cbits)) | 
-	   (Cr << ColorLUT::cbits) | 
-	   Cb );
+  return ( (b << (ColorLUT::gbits + ColorLUT::rbits)) | 
+	   (g << ColorLUT::rcbits) | 
+	   r );
 
 }
 
-static size_t pixel2index(pixel YCrCb) {
+static size_t pixel2index(pixel bgr) {
 
-  downsample(YCrCb);
-  return downsample2index(YCrCb);
+  downsample(bgr);
+  return downsample2index(bgr);
 
 }
-
-
 
 void ColorLUT::save(const std::string& filename) const {
   
@@ -60,9 +56,10 @@ void ColorLUT::save(const std::string& filename) const {
     throw std::runtime_error("File did not open!");
   }
 
-  ostr << "ColorLUT\n"
-       << ybits << "\n"
-       << cbits << "\n"
+  ostr << "ColorLUT2 BGR\n"
+       << bbits << "\n"
+       << gbits << "\n"
+       << rbits << "\n"
        << numcolors << "\n";
 
   for (size_t i=0; i<numcolors; ++i) {
@@ -74,76 +71,35 @@ void ColorLUT::save(const std::string& filename) const {
 
 }
 
-void ColorLUT::addToColor(const pixel& YCrCb, 
-			  size_t cidx, 
-			  int yRange, int cRange) {
+void ColorLUT::addToColor(const pixel& bgr, 
+			  size_t cidx) {
   
   /*NOTE: cidx is the index of the color in the color vector, index is the
     index of the flag in the lookup table*/
-  pixel ds = YCrCb;
-  downsample(ds);  //Downsample the channels of ds to byte form
-  
   colorflags flag = (1 << cidx);
   
-  for (int dy=-yRange; dy<=yRange; ++dy) {
-    for (int dcr=-cRange; dcr<=cRange; ++dcr) {
-      for (int dcb=-cRange; dcb<=cRange; ++dcb) {
-	
-	int y = ds[2] + dy;
-	int cr = ds[1] + dcr;
-	int cb = ds[0] + dcb;
-        //If values are in the correct range to convert to index 
-	if (y >= 0 && y < ycount &&
-	    cr >= 0 && cr < ccount &&
-	    cb >= 0 && cb < ccount) {
-	  
-	  pixel ds2(cb,cr,y);
-	  size_t index = downsample2index(ds2);
-          /*Indicate the index in the LUT data is associated with the color by
-	    flipping the bit corresponding with the color flag*/
-	  lutdata[index] = (lutdata[index] | flag);
-	  
-	}
-	
-      }
-    }
-  }
+  size_t index = pixel2index(bgr);
+
+  /*Indicate the index in the LUT data is associated with the color by
+    flipping the bit corresponding with the color flag*/
+  lutdata[index] = (lutdata[index] | flag);
+
 }
 
-void ColorLUT::removeFromColor(const pixel& YCrCb, 
-			       size_t cidx, 
-			       int yRange, int cRange) {
+void ColorLUT::removeFromColor(const pixel& bgr, 
+			       size_t cidx) {
   
-  pixel ds = YCrCb;
-  downsample(ds);
 
+  size_t index = pixel2index(bgr);
+
+  /*NOTE: cidx is the index of the color in the color vector, index is the
+    index of the flag in the lookup table*/
   colorflags flag = (1 << cidx);
 
-  for (int dy=-yRange; dy<=yRange; ++dy) {
-    for (int dcr=-cRange; dcr<=cRange; ++dcr) {
-      for (int dcb=-cRange; dcb<=cRange; ++dcb) {
-	
-	int y = ds[2] + dy;
-	int cr = ds[1] + dcr;
-	int cb = ds[0] + dcb;
-	
-	if (y >= 0 && y < ycount &&
-	    cr >= 0 && cr < ccount &&
-	    cb >= 0 && cb < ccount) {
-	  
-	  pixel ds2(cb,cr,y);
-	  size_t index = downsample2index(ds2);
-          /*Clear the data at index by ANDing it with the negation of the
-	    colorflag we want to clear*/
-	  lutdata[index] = (lutdata[index] & ~flag);
-	  
-	}
-	
-      }
-    }
-  }
 
-
+  /*Clear the data at index by ANDing it with the negation of the
+    colorflag we want to clear*/
+  lutdata[index] = (lutdata[index] & ~flag);
 
 }
 
@@ -158,9 +114,9 @@ void ColorLUT::clearColor(size_t cidx) {
 }
 
 ColorLUT::colorflags 
-ColorLUT::getColors(const pixel& YCrCb) const {
+ColorLUT::getColors(const pixel& bgr) const {
   
-  size_t index = pixel2index(YCrCb);
+  size_t index = pixel2index(bgr);
   return lutdata[index];
 
 }
@@ -208,13 +164,13 @@ void ColorLUT::load(const std::string& filename) {
 
   std::getline(istr, tmp);
 
-  if (tmp != "ColorLUT") {
-    throw std::runtime_error("expected ColorLUT");
+  if (tmp != "ColorLUT2 BGR") {
+    throw std::runtime_error("expected ColorLUT2 BGR");
   }
 
-  const int numbers[3] = { ybits, cbits, numcolors };
+  const int numbers[4] = { bbits, gbits, cbits, numcolors };
 
-  for (int i=0; i<3; ++i) {
+  for (int i=0; i<4; ++i) {
     std::getline(istr, tmp);
     if (tmp != int2str(numbers[i])) {
       throw std::runtime_error("Loaded values did not match given paramenters");
