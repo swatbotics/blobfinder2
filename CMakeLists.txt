@@ -67,6 +67,8 @@ add_message_files(
   FILES
   BlobInfo3D.msg
   BlobInfo.msg
+  ColorBlobInfo.msg
+  ColorBlobInfo3D.msg
   MultiBlobInfo3D.msg
   MultiBlobInfo.msg
 )
@@ -140,22 +142,6 @@ target_link_libraries(blobfinder2_node
    ColorLUT
 )
 
-set(qt_headers src/ColorGUI.h)
-qt4_wrap_cpp(moc_sources ${qt_headers})
-
-add_executable(colorpicker
-  src/colorpicker.cpp
-  src/ColorGUI.cpp
-  ${moc_sources})
-
-
-add_dependencies(colorpicker blobfinder2_generate_messages_cpp)
-
-target_link_libraries(colorpicker
-   ${catkin_LIBRARIES}
-   ${QT_LIBRARIES}
-   ColorLUT
-)
 
 
 #############

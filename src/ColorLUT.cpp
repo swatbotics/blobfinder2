@@ -37,7 +37,7 @@ static size_t downsample2index(const pixel& bgr) {
   room for the next and ORing them together	*/
 
   return ( (b << (ColorLUT::gbits + ColorLUT::rbits)) | 
-	   (g << ColorLUT::rcbits) | 
+	   (g << ColorLUT::rbits) | 
 	   r );
 
 }
@@ -168,7 +168,7 @@ void ColorLUT::load(const std::string& filename) {
     throw std::runtime_error("expected ColorLUT2 BGR");
   }
 
-  const int numbers[4] = { bbits, gbits, cbits, numcolors };
+  const int numbers[4] = { bbits, gbits, rbits, numcolors };
 
   for (int i=0; i<4; ++i) {
     std::getline(istr, tmp);
