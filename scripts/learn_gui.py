@@ -772,6 +772,10 @@ class LearnGUI:
                 pos_mask = masks['pos'].view(bool)
                 neg_mask = masks['neg'].view(bool)
 
+                if not np.any(pos_mask):
+                    pos_mask[:] = False
+                    neg_mask[:] = False
+
                 assert (pos_mask & neg_mask).sum() == 0
 
                 showme[pos_mask & pred] = TRUE_POS_COLOR
@@ -908,7 +912,8 @@ class LearnGUI:
                 
             for _ in range(MAX_COLORS - len(self.colors)):
                 ostr.write('\n')
-
+                
+        with open(path, 'ab') as ostr:
             ostr.write(self.lut.tobytes())
             
         print('wrote', path)
