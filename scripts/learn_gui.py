@@ -46,7 +46,7 @@ EXTENSIONS = ['.png', '.jpg']
 
 WINDOW = 'Color picker'
 
-MODES = ['draw', 'roundtrip', 'classified', 'error']
+MODES = ['draw', 'roundtrip', 'classified', 'error', 'all_classified']
 
 POS_COLOR = np.array([0, 255, 127], dtype=np.uint8)
 BUF_COLOR = np.array([255, 127, 0], dtype=np.uint8)
@@ -344,12 +344,9 @@ class LearnGUI:
         print()
 
         lut_3d_shape = 1 << CHAN_BITS
-        print('3D LUT is', lut_3d_shape)
 
         delta_bits = CHAN_BITS.max() - CHAN_BITS
         grid_spacing = (1 << delta_bits)
-
-        print('grid spacing is', grid_spacing)
 
         for cidx, color in enumerate(self.colors):
 
@@ -589,8 +586,6 @@ class LearnGUI:
                     self.mouse_point = p
                     self.orig_rect = rect.copy()
 
-                    print('selected handle {} in cur rect'.format(hidx))
-
                 else:
 
                     xformed_rect = self.transform_rect(rect)
@@ -605,8 +600,6 @@ class LearnGUI:
 
                         self.mouse_point = p
                         self.orig_rect = rect.copy()
-
-                        print('selected entire cur rect')
 
 
             if self.mouse_mode is None:
@@ -625,7 +618,6 @@ class LearnGUI:
                             self.mouse_point = p
                             self.orig_rect = rect.copy()
                             self.cur_rect = (key, idx)
-                            print('selected entire rect', self.cur_rect)
                             self.draw()
                             break
 
@@ -801,43 +793,56 @@ class LearnGUI:
             cv2.warpAffine(img, self.cur_xform[:2],
                            (w, h), self.display, cv2.INTER_NEAREST)
 
-        elif mode == 'classified' or mode == 'error':
+        elif mode == 'classified' or mode == 'error' or mode == 'all_classified':
 
 
             indexed = to_indexed(self.cur_image)
             all_pred = self.lut[indexed]
 
-            pred = ((all_pred >> self.cur_color_index) & 1)
-
-            pred = cleanup(pred, self.pred_blur_sigma).view(bool)
-            
             showme = np.full((h, w, 3), 127, dtype=np.uint8)
 
-            if mode == 'classified':
 
-                print(showme.shape, showme.dtype)
-                print(pred.shape, pred.dtype)
+            if mode == 'all_classified':
 
-                showme[pred] = self.mean_colors[self.cur_color_index]
+                pmask = np.zeros((h, w), dtype=bool)
+
+                for cidx in range(len(self.colors)):
+
+                    pred = ((all_pred >> cidx) & 1)
+
+                    pred = cleanup(pred, self.pred_blur_sigma).view(bool)
+
+                    pmask[pred] = True
+                    showme[pred] = self.mean_colors[cidx]
 
             else:
 
-                masks = self.get_masks(filename, color)
+                pred = ((all_pred >> self.cur_color_index) & 1)
 
-                pos_mask = masks['pos'].view(bool)
-                neg_mask = masks['neg'].view(bool)
+                pred = cleanup(pred, self.pred_blur_sigma).view(bool)
 
-                if not np.any(pos_mask):
-                    pos_mask[:] = False
-                    neg_mask[:] = False
+                if mode == 'classified':
 
-                assert (pos_mask & neg_mask).sum() == 0
+                    showme[pred] = self.mean_colors[self.cur_color_index]
 
-                showme[pos_mask & pred] = TRUE_POS_COLOR
-                showme[neg_mask & pred] = FALSE_POS_COLOR
+                else:
 
-                showme[pos_mask & ~pred] = FALSE_NEG_COLOR
-                showme[neg_mask & ~pred] = TRUE_NEG_COLOR
+                    masks = self.get_masks(filename, color)
+
+                    pos_mask = masks['pos'].view(bool)
+                    neg_mask = masks['neg'].view(bool)
+
+                    if not np.any(pos_mask):
+                        pos_mask[:] = False
+                        neg_mask[:] = False
+
+                    assert (pos_mask & neg_mask).sum() == 0
+
+                    showme[pos_mask & pred] = TRUE_POS_COLOR
+                    showme[neg_mask & pred] = FALSE_POS_COLOR
+
+                    showme[pos_mask & ~pred] = FALSE_NEG_COLOR
+                    showme[neg_mask & ~pred] = TRUE_NEG_COLOR
 
             cv2.warpAffine(showme, self.cur_xform[:2],
                            (w, h), self.display, cv2.INTER_NEAREST)
@@ -954,10 +959,8 @@ class LearnGUI:
 
             try:
                 self.pred_blur_sigma = jsdata['pred_blur_sigma']
-                print('set to json', jsdata['pred_blur_sigma'])
             except KeyError:
                 self.pred_blur_sigma = PRED_BLUR_SIGMA
-                print('set to default', PRED_BLUR_SIGMA)
 
     def save_config(self):
 
@@ -1097,8 +1100,6 @@ class LearnGUI:
 
                 if k >= 0 and self.mouse_mode is None:
                     break
-
-            print('k =', k)
 
             nudge = 32.0 / self.cur_scale
             redraw = False
@@ -1334,8 +1335,6 @@ class LearnGUI:
             self.cur_rect = (key, idx)
         
 def main():
-
-    print('LUT will have size', LUT_SIZE)
 
     if len(sys.argv) != 2 or not os.path.isdir(sys.argv[1]):
         print('usage: python {} DIRNAME'.format(os.path.sys.argv[0]))
