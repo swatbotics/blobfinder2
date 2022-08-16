@@ -32,6 +32,7 @@ import os
 import cv2
 import numpy as np
 import json
+import scipy.ndimage
 
 import re
 
@@ -335,11 +336,20 @@ class LearnGUI:
                 pn_counts[cidx, neg_idx, 1] += neg_counts
 
         print()
-                
+
+        lut_3d_shape = 1 << CHAN_BITS
+        print('3D LUT is', lut_3d_shape)
+
+        delta_bits = CHAN_BITS.max() - CHAN_BITS
+        grid_spacing = (1 << delta_bits)
+
+        print('grid spacing is', grid_spacing)
+
         for cidx, color in enumerate(self.colors):
 
             num_pos, num_neg = pn_counts[cidx].sum(axis=0)
 
+            print()
             print('color {} has {} pos, {} neg'.format(color, num_pos, num_neg))
             
             if num_pos == 0:
@@ -354,6 +364,43 @@ class LearnGUI:
             w_counts = pn_counts[cidx] * w
 
             is_pos = (w_counts[:,0] > w_counts[:,1]).astype(np.uint8)
+
+            is_unlabeled = (pn_counts[cidx].sum(axis=1) == 0)
+
+            print('  got {}/{} ({:.2f}%) unlabled indices for color {}'.format(
+                is_unlabeled.sum(), LUT_SIZE, 
+                100.0*is_unlabeled.sum()/LUT_SIZE, color))
+
+            bin_image = is_unlabeled.reshape(lut_3d_shape)
+
+            print('  computing the fancy expensive EDT...')
+
+            dists, indices = scipy.ndimage.distance_transform_edt(
+                bin_image, 
+                sampling=grid_spacing, 
+                return_distances=True, return_indices=True)
+
+            print('  dists is', dists.shape, dists.dtype)
+            print('  indices is', indices.shape, indices.dtype)
+
+            indices = indices.reshape((len(CHAN_BITS), LUT_SIZE))
+
+            closest_ind = np.zeros(LUT_SIZE, dtype=np.int32)
+
+            for chan in range(len(CHAN_BITS)):
+                lshift = CHAN_BITS[chan+1:].sum()
+                closest_ind[:] = closest_ind | (indices[chan, :] << lshift)
+
+            is_labeled, = np.nonzero(~is_unlabeled)
+
+            assert np.all(closest_ind[is_labeled] == is_labeled)
+
+            print('  before EDT correction, is_pos.sum() =', is_pos.sum())
+            
+            is_pos[is_unlabeled] = is_pos[is_unlabeled] | is_pos[closest_ind[is_unlabeled]]
+
+            print('  after EDT correction, is_pos.sum() =', is_pos.sum())
+
 
             self.lut = self.lut | (is_pos << cidx)
 
