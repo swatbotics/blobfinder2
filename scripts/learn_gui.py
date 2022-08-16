@@ -3,22 +3,17 @@
 from __future__ import print_function
 
 # TODO:
-#  - actual kernelized SVM? (n.b. 2K x 2K is 2^32 too big for explicit matrix)
+#  - save last view in dot file?
 #  - create file from command line with named colors
-#  - blur then threshold?
-#  - spit out blobfinder2 data file
 #  - random train/test split?
-#  - add noise for improved generalization? 
 #  - remove color from command line
 #  - better interactive tools / bootstrapping
-#  - save last view in dot file?
 #
 # DONE:
 #  - DONE: brute-force nearest neighbor for unlabeled pixels?
-#
-# IN LAB:
-#  - DONE: replace pylons with cones
-#  - DONE: blue ball is probably OK with astra
+#  - DONE: customizable per-file blur sigma to cleanup
+#  - DONE: spit out blobfinder2 data file
+#  - DONE: replace pylons with cones in lab
 #  
 # UPDATED ROS NODE
 #  - just 4 topics:
@@ -35,6 +30,7 @@ import cv2
 import numpy as np
 import json
 import scipy.ndimage
+import dotenv
 
 import re
 
@@ -402,7 +398,7 @@ class LearnGUI:
 
             print('  before EDT correction, is_pos.sum() =', is_pos.sum())
             
-            #is_pos[is_unlabeled] = is_pos[closest_ind[is_unlabeled]]
+            is_pos[is_unlabeled] = is_pos[closest_ind[is_unlabeled]]
             
             print('  after EDT correction, is_pos.sum() =', is_pos.sum())
 
