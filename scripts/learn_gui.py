@@ -3,7 +3,6 @@
 from __future__ import print_function
 
 # TODO:
-#  - brute-force nearest neighbor for unlabeled pixels?
 #  - actual kernelized SVM? (n.b. 2K x 2K is 2^32 too big for explicit matrix)
 #  - create file from command line with named colors
 #  - blur then threshold?
@@ -14,9 +13,12 @@ from __future__ import print_function
 #  - better interactive tools / bootstrapping
 #  - save last view in dot file?
 #
+# DONE:
+#  - DONE: brute-force nearest neighbor for unlabeled pixels?
+#
 # IN LAB:
-#  - green pylons are too dark with astra autoexposure
-#  - blue ball is probably OK with astra
+#  - DONE: replace pylons with cones
+#  - DONE: blue ball is probably OK with astra
 #  
 # UPDATED ROS NODE
 #  - just 4 topics:
@@ -101,7 +103,7 @@ Press any key to continue...
 
 JSON_REPS = [
     (r'\[\n *([0-9]+)', '[ \\1'),
-    (r'([0-9]+,?) *\n *', '\\1 ')
+    (r'([^.])([0-9]+,?) *\n *', '\\1\\2 ')
 ]
 
 
@@ -265,11 +267,6 @@ class LearnGUI:
         print('got images:', self.images)
         print('max dims are', max_dims)
 
-        self.load_data()
-
-        self.train()
-
-        self.save_lut()
 
         h, w = max_dims
         self.display = np.zeros((h, w, 3), dtype=np.uint8)
@@ -290,6 +287,14 @@ class LearnGUI:
         self.mouse_mode = None
         self.mouse_point = None
         self.handle_point = None
+
+        self.pred_blur_sigma = PRED_BLUR_SIGMA
+
+        self.load_data()
+
+        self.train()
+
+        self.save_lut()
 
         flags = cv2.WINDOW_GUI_NORMAL | cv2.WINDOW_AUTOSIZE
 
@@ -397,8 +402,8 @@ class LearnGUI:
 
             print('  before EDT correction, is_pos.sum() =', is_pos.sum())
             
-            is_pos[is_unlabeled] = is_pos[is_unlabeled] | is_pos[closest_ind[is_unlabeled]]
-
+            #is_pos[is_unlabeled] = is_pos[closest_ind[is_unlabeled]]
+            
             print('  after EDT correction, is_pos.sum() =', is_pos.sum())
 
 
@@ -442,7 +447,7 @@ class LearnGUI:
 
                 pred = ((all_pred >> cidx) & 1)
 
-                pred = cleanup(pred, PRED_BLUR_SIGMA).view(bool)
+                pred = cleanup(pred, self.pred_blur_sigma).view(bool)
 
                 error = ( w_pos * (pos_mask & ~pred).sum() +
                           w_neg * (neg_mask & pred).sum() )
@@ -803,7 +808,7 @@ class LearnGUI:
 
             pred = ((all_pred >> self.cur_color_index) & 1)
 
-            pred = cleanup(pred, PRED_BLUR_SIGMA).view(bool)
+            pred = cleanup(pred, self.pred_blur_sigma).view(bool)
             
             showme = np.full((h, w, 3), 127, dtype=np.uint8)
 
@@ -909,6 +914,15 @@ class LearnGUI:
                     c[color] = t
                 self.rectangles[filename] = c
 
+            try:
+                self.pred_blur_sigma = jsdata['pred_blur_sigma']
+                print('set to json', jsdata['pred_blur_sigma'])
+            except KeyError:
+                self.pred_blur_sigma = PRED_BLUR_SIGMA
+                print('set to default', PRED_BLUR_SIGMA)
+
+
+
     def save_data(self):
 
         jsonfile = os.path.join(self.dirname, 'colordata.json')
@@ -931,9 +945,10 @@ class LearnGUI:
                 jsc[color] = jst
             jsr[filename] = jsc
 
-        saveme = dict(colors=self.colors, rectangles=jsr)
+        saveme = dict(colors=self.colors, rectangles=jsr, 
+                      pred_blur_sigma=self.pred_blur_sigma)
 
-        outdata = json.dumps(saveme, indent=2)
+        outdata = json.dumps(saveme, indent=2, sort_keys=True)
 
         for (pat, rep) in JSON_REPS:
             outdata = re.sub(pat, rep, outdata)
@@ -958,9 +973,12 @@ class LearnGUI:
             for color in self.colors:
                 ostr.write('{}\n'.format(color))
                 
-                
             for _ in range(MAX_COLORS - len(self.colors)):
                 ostr.write('\n')
+
+            ostr.write(repr(self.pred_blur_sigma))
+            ostr.write('\n')
+
                 
         with open(path, 'ab') as ostr:
             ostr.write(self.lut.tobytes())
