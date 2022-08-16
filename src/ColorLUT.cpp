@@ -18,6 +18,7 @@ typedef ColorLUT::pixel pixel;
 
 ColorLUT::ColorLUT() {
   lutdata.resize(arraysize, 0);
+  mask_blur_sigma = 0.0;
 }
 
 static void downsample(pixel& bgr) {
@@ -190,6 +191,25 @@ static std::string int2str(int i) {
   return ostr.str();
 }
 
+static float str2float(const std::string& str) {
+
+  char* endptr = 0;
+
+  fprintf(stderr, "parsing float %s", str.c_str());
+
+  float rval = strtof(str.c_str(), &endptr);
+
+  fprintf(stderr, "got result %f with endptr=%p value %d", rval, endptr, endptr ? *endptr : -1);
+
+  if (!endptr || *endptr) {
+    throw std::runtime_error("error parsing float");
+  }
+
+  return rval;
+
+}
+
+
 void ColorLUT::load(const std::string& filename) {
 
   std::ifstream istr(filename.c_str());
@@ -218,6 +238,12 @@ void ColorLUT::load(const std::string& filename) {
   for (size_t i=0; i<numcolors; ++i) {
     std::getline(istr, colornames[i]);
   }
+
+  std::string mask_blur_sigma_str;
+
+  std::getline(istr, mask_blur_sigma_str);
+
+  mask_blur_sigma = str2float(mask_blur_sigma_str);
 
   istr.read( (char*)(&lutdata[0]),
 	     sizeof(colorflags)*lutdata.size() );

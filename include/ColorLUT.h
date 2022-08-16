@@ -105,6 +105,9 @@ public:
    */
   std::string colornames[numcolors];
 
+  /* Radius for Gaussian blur of detection image. */
+  float mask_blur_sigma;
+
   //////////////////////////////////////////////////////////////////////
 
   /* Constructor. */

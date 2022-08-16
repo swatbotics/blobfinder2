@@ -30,8 +30,6 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl_ros/point_cloud.h>
 
-const double MASK_BLUR_SIGMA = 1.4;
-
 using sensor_msgs::Image;
 using sensor_msgs::image_encodings::BGR8;
 using sensor_msgs::image_encodings::MONO8;
@@ -126,9 +124,6 @@ public:
 
   // mean colors per channel
   cv::Vec3b mean_colors[ColorLUT::numcolors];
-
-  // structuring element for morphological opening 
-  cv::Mat strel; 
 
   // is this the first image?
   bool first_image; 
@@ -437,7 +432,7 @@ BlobFinder2::BlobFinder2() {
   int roi_y = 0;
   int roi_w = 0;
   int roi_h = 0;
-  int open_size = 2;
+
   bool use_points = false;
   std::string datafile;
   max_blob_count = 0;
@@ -448,16 +443,12 @@ BlobFinder2::BlobFinder2() {
   nh.param("/blobfinder2/roi_y", roi_y, roi_y);
   nh.param("/blobfinder2/roi_w", roi_w, roi_w);
   nh.param("/blobfinder2/roi_h", roi_h, roi_h);
-  nh.param("/blobfinder2/open_size", open_size, open_size);
   nh.param("/blobfinder2/datafile", datafile, datafile);
   nh.param("/blobfinder2/max_blob_count", max_blob_count, max_blob_count);
   nh.param("/blobfinder2/min_blob_area", min_blob_area, min_blob_area);
   nh.param("/blobfinder2/use_points", use_points, use_points);
   nh.param("/blobfinder2/point_search_radius", point_search_radius, point_search_radius);
 
-  int sz = 2*open_size+1;
-  
-  strel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(sz,sz));
 
   roi = cv::Rect(roi_x, roi_y, roi_w, roi_h);
 
@@ -616,20 +607,28 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     debug_mask = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8U);
     debug_image_bgr = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
   }
+
   
 
   for (size_t cidx=0; cidx<ColorLUT::numcolors; ++cidx) {
 
+    // skip unused colors
+    if (lut.colornames[cidx] == "") { continue; }
+
     // get mask for this channel
     lut.colorFlagsToMask(colorflags, cidx, cidx_mask);
 
-    // clean it up
-    cv::GaussianBlur(cidx_mask, cidx_mask,
-		     cv::Size(0, 0), MASK_BLUR_SIGMA);
-
-    // re-binarize after blur
-    cv::threshold(cidx_mask, cidx_mask,
-		  127, 255, cv::THRESH_BINARY);
+    if (lut.mask_blur_sigma > 0.0) {
+      
+      // clean it up
+      cv::GaussianBlur(cidx_mask, cidx_mask,
+		       cv::Size(0, 0), lut.mask_blur_sigma);
+      
+      // re-binarize after blur
+      cv::threshold(cidx_mask, cidx_mask,
+		      127, 255, cv::THRESH_BINARY);
+      
+    }
 
     if (num_debug_image_subscribers > 0) {
 
