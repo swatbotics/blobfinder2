@@ -10,6 +10,9 @@ from __future__ import print_function
 #  - non-rectangular area?
 #
 # DONE:
+#  - DONE: hotkey for learning
+#  - DONE: replace all_classified with [none] color 
+#  - DONE: add all_classified
 #  - DONE: save last view in dot file?
 #  - DONE: brute-force nearest neighbor for unlabeled pixels?
 #  - DONE: customizable per-file blur sigma to cleanup
@@ -46,7 +49,7 @@ EXTENSIONS = ['.png', '.jpg']
 
 WINDOW = 'Color picker'
 
-MODES = ['draw', 'roundtrip', 'classified', 'error', 'all_classified']
+MODES = ['draw', 'classified', 'error']
 
 POS_COLOR = np.array([0, 255, 127], dtype=np.uint8)
 BUF_COLOR = np.array([255, 127, 0], dtype=np.uint8)
@@ -83,6 +86,8 @@ HELP = '''Keyboard controls (* denotes in draw mode only)
   A or -\tzoom out
   Z or +\tzoom in 
   SHIFT + CLICK\tscroll
+
+  L\tlearn LUT
 
   P\tadd positive rectangle*
   B\tadd buffer rectangle*
@@ -204,17 +209,6 @@ def from_indexed(indexed):
 
     return img
         
-def roundtrip(img):
-
-    return from_indexed(to_indexed(img))
-
-    #if COLORSPACE != -1:
-    #img = cv2.cvtColor(img, COLORSPACE)
-
-    #if COLORSPACE_INV != -1:
-    #    img = cv2.cvtColor(img, COLORSPACE_INV)
-
-    #return img
 
 def cleanup(mask, sigma):
 
@@ -288,8 +282,6 @@ class LearnGUI:
         self.load_data()
 
         self.train()
-
-        self.save_lut()
 
         flags = cv2.WINDOW_GUI_NORMAL | cv2.WINDOW_AUTOSIZE
 
@@ -407,6 +399,8 @@ class LearnGUI:
 
             self.lut = self.lut | (is_pos << cidx)
 
+        self.save_lut()
+
         self.evaluate()
 
     def evaluate(self):
@@ -513,11 +507,11 @@ class LearnGUI:
             self.mouse_mode = 'scroll'
             self.mouse_point = p
 
-        if mode != 'draw':
+        if mode != 'draw' or self.cur_color_index < 0:
             return
 
         filename = self.images[self.cur_image_index]
-
+        
         color = self.colors[self.cur_color_index]
 
         which_rects = self.get_rectangles(filename, color)
@@ -651,7 +645,7 @@ class LearnGUI:
             self.cur_color_index = color_index
 
         if delta_color_index is not None:
-            self.cur_color_index = apply_delta(self.cur_color_index, len(self.colors), delta_color_index)
+            self.cur_color_index = apply_delta(self.cur_color_index + 1, len(self.colors) + 1, delta_color_index) - 1
             
         if mode_index is not None:
             self.cur_mode_index = mode_index
@@ -713,7 +707,12 @@ class LearnGUI:
     def draw(self):
 
         filename = self.images[self.cur_image_index]
-        color = self.colors[self.cur_color_index]
+
+        if self.cur_color_index < 0:
+            color = '[none]'
+        else:
+            color = self.colors[self.cur_color_index]
+
         mode = MODES[self.cur_mode_index]
 
         h, w = self.display.shape[:2]
@@ -740,60 +739,56 @@ class LearnGUI:
 
         if mode == 'draw':
 
-            which_rects = self.get_rectangles(filename, color)
-
-
-            masks = self.get_masks(filename, color)
 
             cv2.warpAffine(self.cur_image, self.cur_xform[:2],
                            (w, h), self.display, cv2.INTER_NEAREST)
 
-            pmask = cv2.warpAffine(masks['pos'], self.cur_xform[:2],
-                           (w, h), None, cv2.INTER_NEAREST)\
-                       .view(bool)
+            if self.cur_color_index >= 0:
 
-            bmask = cv2.warpAffine(masks['buf'], self.cur_xform[:2],
-                                   (w, h), None, cv2.INTER_NEAREST)\
-                       .view(bool)
+                which_rects = self.get_rectangles(filename, color)
 
-            overlap = pmask & bmask
 
-            pmask[overlap & self.checker] = False
-            bmask[overlap & ~self.checker] = False
+                masks = self.get_masks(filename, color)
 
-            self.display[pmask] = self.display[pmask] // 2 + POS_COLOR // 2
-            self.display[bmask] = self.display[bmask] // 2 + BUF_COLOR // 2
+                pmask = cv2.warpAffine(masks['pos'], self.cur_xform[:2],
+                               (w, h), None, cv2.INTER_NEAREST)\
+                           .view(bool)
 
-            if self.cur_rect is not None:
+                bmask = cv2.warpAffine(masks['buf'], self.cur_xform[:2],
+                                       (w, h), None, cv2.INTER_NEAREST)\
+                           .view(bool)
 
-                key, idx = self.cur_rect
+                overlap = pmask & bmask
 
-                rect = which_rects[key][idx]
+                pmask[overlap & self.checker] = False
+                bmask[overlap & ~self.checker] = False
 
-                lite = tuple([int(ci) for ci in WHICH_COLORS[key]])
-                dark = tuple([int(ci//2) for ci in WHICH_COLORS[key]])
+                self.display[pmask] = self.display[pmask] // 2 + POS_COLOR // 2
+                self.display[bmask] = self.display[bmask] // 2 + BUF_COLOR // 2
 
-                
-                handles = self.get_rect_handles(rect)
+                if self.cur_rect is not None:
 
-                for x, y in handles:
+                    key, idx = self.cur_rect
 
-                    cv2.rectangle(self.display, 
-                                  (x-2, y-2), (x+2, y+2),
-                                  dark, -1)
+                    rect = which_rects[key][idx]
 
-                    cv2.rectangle(self.display, 
-                                  (x-1, y-1), (x+1, y+1),
-                                  lite, -1)
+                    lite = tuple([int(ci) for ci in WHICH_COLORS[key]])
+                    dark = tuple([int(ci//2) for ci in WHICH_COLORS[key]])
 
-        elif mode == 'roundtrip':
 
-            img = roundtrip(self.cur_image)
+                    handles = self.get_rect_handles(rect)
 
-            cv2.warpAffine(img, self.cur_xform[:2],
-                           (w, h), self.display, cv2.INTER_NEAREST)
+                    for x, y in handles:
 
-        elif mode == 'classified' or mode == 'error' or mode == 'all_classified':
+                        cv2.rectangle(self.display, 
+                                      (x-2, y-2), (x+2, y+2),
+                                      dark, -1)
+
+                        cv2.rectangle(self.display, 
+                                      (x-1, y-1), (x+1, y+1),
+                                      lite, -1)
+
+        elif mode == 'classified' or mode == 'error':
 
 
             indexed = to_indexed(self.cur_image)
@@ -802,18 +797,20 @@ class LearnGUI:
             showme = np.full((h, w, 3), 127, dtype=np.uint8)
 
 
-            if mode == 'all_classified':
+            if self.cur_color_index < 0:
 
-                pmask = np.zeros((h, w), dtype=bool)
+                if mode == 'classified':
 
-                for cidx in range(len(self.colors)):
+                    pmask = np.zeros((h, w), dtype=bool)
 
-                    pred = ((all_pred >> cidx) & 1)
+                    for cidx in range(len(self.colors)):
 
-                    pred = cleanup(pred, self.pred_blur_sigma).view(bool)
+                        pred = ((all_pred >> cidx) & 1)
 
-                    pmask[pred] = True
-                    showme[pred] = self.mean_colors[cidx]
+                        pred = cleanup(pred, self.pred_blur_sigma).view(bool)
+
+                        pmask[pred] = True
+                        showme[pred] = self.mean_colors[cidx]
 
             else:
 
@@ -906,10 +903,13 @@ class LearnGUI:
                     pass
 
             if 'color' in dv:
-                try: 
-                    color_index = self.colors.index(dv['color'])
-                except:
-                    pass
+                if dv['color'] == '[none]':
+                    color_index = -1
+                else:
+                    try: 
+                        color_index = self.colors.index(dv['color'])
+                    except:
+                        pass
 
             if 'mode' in dv:
                 try:
@@ -964,7 +964,11 @@ class LearnGUI:
 
     def save_config(self):
 
-        color = self.colors[self.cur_color_index]
+        if self.cur_color_index >= 0:
+            color = self.colors[self.cur_color_index]
+        else:
+            color = '[none]'
+
         image = self.images[self.cur_image_index]
         mode = MODES[self.cur_mode_index]
 
@@ -1036,6 +1040,7 @@ class LearnGUI:
         with open(path, 'ab') as ostr:
             ostr.write(self.lut.tobytes())
             
+        print()
         print('wrote', path)
 
     def get_rectangles(self, filename, color): # -> [pos, neg]
@@ -1096,7 +1101,7 @@ class LearnGUI:
 
             while True:
 
-                k = cv2.waitKey()
+                k = cv2.waitKey(15)
 
                 if k >= 0 and self.mouse_mode is None:
                     break
@@ -1143,6 +1148,9 @@ class LearnGUI:
                 self.cur_center = np.array([w//2, h//2], dtype=np.float32)
                 redraw = True
 
+            if k == ord('l') or k == ord('L'):
+                self.train()
+
             # mode changing
             
             if k == ord('['):
@@ -1158,7 +1166,7 @@ class LearnGUI:
             elif k == ord('x') or k == ord('X'):
                 self.set_mode(delta_color_index=-1)
 
-            if mode == 'draw':
+            if mode == 'draw' and self.cur_color_index >= 0:
                 if k == 9: # tab
                     self.delta_select(1)
                     redraw = True
