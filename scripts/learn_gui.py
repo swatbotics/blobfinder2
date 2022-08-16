@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 # TODO:
+#  - per-color sigma?
 #  - save last view in dot file?
 #  - create file from command line with named colors
 #  - random train/test split?
@@ -116,7 +117,7 @@ HANDLE_MASKS = np.array([
     [0, 0, 0, 1], # bottom
     [0, 0, 1, 0], # right
     [0, 1, 0, 0], # top
-    [1, 0, 0, 1], # left
+    [1, 0, 0, 0], # left
     [1, 1, 0, 0], # top left
     [0, 1, 1, 0], # top right
     [0, 0, 1, 1], # bottom right
@@ -841,7 +842,6 @@ class LearnGUI:
 
         else:
 
-            # TODO: different mode
             self.display[:] = 127
 
         ##################################################
