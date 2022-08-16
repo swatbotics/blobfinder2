@@ -3,6 +3,8 @@
 from __future__ import print_function
 
 # TODO:
+#  - brute-force nearest neighbor for unlabeled pixels?
+#  - actual kernelized SVM? (n.b. 2K x 2K is 2^32 too big for explicit matrix)
 #  - create file from command line with named colors
 #  - blur then threshold?
 #  - spit out blobfinder2 data file
