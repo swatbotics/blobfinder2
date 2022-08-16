@@ -3,14 +3,14 @@
 from __future__ import print_function
 
 # TODO:
-#  - per-color sigma?
-#  - save last view in dot file?
 #  - create file from command line with named colors
-#  - random train/test split?
+#  - random train/test split of tiles
 #  - remove color from command line
 #  - better interactive tools / bootstrapping
+#  - non-rectangular area?
 #
 # DONE:
+#  - DONE: save last view in dot file?
 #  - DONE: brute-force nearest neighbor for unlabeled pixels?
 #  - DONE: customizable per-file blur sigma to cleanup
 #  - DONE: spit out blobfinder2 data file
@@ -31,10 +31,8 @@ import cv2
 import numpy as np
 import json
 import scipy.ndimage
-import dotenv
 
 import re
-
 
 CHAN_BITS = np.array([5, 6, 5])
 
@@ -297,7 +295,13 @@ class LearnGUI:
 
         cv2.namedWindow(WINDOW, flags)
 
-        self.set_mode(0, 0, 0)
+
+        image_index, color_index, mode_index = self.load_config()
+
+
+        self.set_mode(image_index, color_index, mode_index)
+
+    
 
     def train(self):
 
@@ -871,7 +875,45 @@ class LearnGUI:
                 filename, color, mode), (x, y), FONT_SCALE)
 
         cv2.imshow(WINDOW, self.display)
-                
+        
+    def load_config(self):
+
+
+        dirname = os.path.expanduser('~')
+
+        filename = os.path.join(dirname, '.colorlut2')
+
+        if not os.path.exists(filename):
+            return 0, 0, 0
+
+        image_index = 0
+        color_index = 0
+        mode_index = 0
+
+        with open(filename, 'r') as istr:
+
+            dv = json.load(istr)
+
+            if 'image' in dv:
+                try:
+                    image_index = self.images.index(dv['image'])
+                except:
+                    pass
+
+            if 'color' in dv:
+                try: 
+                    color_index = self.colors.index(dv['color'])
+                except:
+                    pass
+
+            if 'mode' in dv:
+                try:
+                    mode_index = MODES.index(dv['mode'])
+                except:
+                    pass
+
+        return image_index, color_index, mode_index
+
 
     def load_data(self):
 
@@ -917,7 +959,19 @@ class LearnGUI:
                 self.pred_blur_sigma = PRED_BLUR_SIGMA
                 print('set to default', PRED_BLUR_SIGMA)
 
+    def save_config(self):
 
+        color = self.colors[self.cur_color_index]
+        image = self.images[self.cur_image_index]
+        mode = MODES[self.cur_mode_index]
+
+        dirname = os.path.expanduser('~')
+        filename = os.path.join(dirname, '.colorlut2')
+
+        config = dict(color=color, image=image, mode=mode)
+
+        with open(filename, 'w') as ostr:
+            json.dump(config, ostr, indent=2, sort_keys=True)
 
     def save_data(self):
 
@@ -1060,6 +1114,7 @@ class LearnGUI:
             elif k == ord('q') or k == ord('Q') or k == 27:
 
                 self.save_data()
+                self.save_config()
 
                 return
             elif k == ord('?'):
