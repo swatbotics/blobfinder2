@@ -125,6 +125,9 @@ public:
   // mean colors per channel
   cv::Vec3b mean_colors[ColorLUT::numcolors];
 
+  // how many named colors are there in the LUT?
+  size_t num_named_colors;
+
   // is this the first image?
   bool first_image; 
 
@@ -175,6 +178,9 @@ public:
   void subs_inc(size_t&, const ros::SingleSubscriberPublisher&);
   void subs_dec(size_t&, const ros::SingleSubscriberPublisher&);
 
+  void get_pos3d(blobfinder2::BlobInfo3D& b3d,
+		 const PointCloudHelper& pch);
+  
 };
 
 /*
@@ -460,13 +466,22 @@ BlobFinder2::BlobFinder2() {
 
   lut.getMeanColors(mean_colors);
 
+  num_named_colors = 0;
+
   for (size_t cidx=0; cidx<ColorLUT::numcolors; ++cidx) {
+    
     if (lut.colornames[cidx] != "") {
+
+      num_named_colors = cidx + 1;
+      
       const cv::Vec3b& mc = mean_colors[cidx];
+      
       fprintf(stderr, "mean color for %s is (%d, %d, %d)\n",
 	      lut.colornames[cidx].c_str(),
 	      int(mc[0]), int(mc[1]), int(mc[2]));
+      
     }
+    
   }
 
   /*
@@ -482,8 +497,10 @@ BlobFinder2::BlobFinder2() {
   num_colorflags_subscribers = 0;
   num_debug_image_subscribers = 0;
 
+  int qsz = 4;
+
   blobs_pub = nh.advertise<blobfinder2::MultiBlobInfo>
-    ("/blobfinder2/blobs", 100,
+    ("/blobfinder2/blobs", qsz,
      boost::bind(&BlobFinder2::subs_inc,
 		 boost::ref(*this),
 		 boost::ref(num_blobs_subscribers), _1),
@@ -491,8 +508,17 @@ BlobFinder2::BlobFinder2() {
 		 boost::ref(*this),
 		 boost::ref(num_blobs_subscribers), _1));
 
+    blobs3d_pub = nh.advertise<blobfinder2::MultiBlobInfo3D>
+    ("/blobfinder2/blobs3d", qsz,
+     boost::bind(&BlobFinder2::subs_inc,
+		 boost::ref(*this),
+		 boost::ref(num_blobs3d_subscribers), _1),
+     boost::bind(&BlobFinder2::subs_dec,
+		 boost::ref(*this),
+		 boost::ref(num_blobs3d_subscribers), _1));
+
   colorflags_pub = nh.advertise<sensor_msgs::Image>
-    ("/blobfinder2/colorflags", 100,
+    ("/blobfinder2/colorflags", qsz,
      boost::bind(&BlobFinder2::subs_inc,
 		 boost::ref(*this),
 		 boost::ref(num_colorflags_subscribers), _1),
@@ -501,7 +527,7 @@ BlobFinder2::BlobFinder2() {
 		 boost::ref(num_colorflags_subscribers), _1));
 
   debug_image_pub = nh.advertise<sensor_msgs::Image>
-    ("/blobfinder2/debug_image", 100,
+    ("/blobfinder2/debug_image", qsz,
      boost::bind(&BlobFinder2::subs_inc,
 		 boost::ref(*this),
 		 boost::ref(num_debug_image_subscribers), _1),
@@ -550,11 +576,63 @@ void BlobFinder2::setROI(int w, int h) {
 void BlobFinder2::subs_inc(size_t& count,
 			   const ros::SingleSubscriberPublisher& _) {
   ++count;
+  fprintf(stderr, "after subs_inc, count is %d\n", (int)count);
 }
 
 void BlobFinder2::subs_dec(size_t& count,
 			   const ros::SingleSubscriberPublisher& _) {
   if (count) { --count; }
+  fprintf(stderr, "after subs_dec, count is %d\n", (int)count);
+}
+
+
+void BlobFinder2::get_pos3d(blobfinder2::BlobInfo3D& b3d,
+			    const PointCloudHelper& pch) {
+
+  assert(pch.ok);
+
+  b3d.have_pos = false;
+
+  int best_dist = 0;
+  const int rad = point_search_radius;
+  const cv::Rect& rect = roi;
+  
+  for (int dy=-rad; dy<=rad; ++dy) {
+    for (int dx=-rad; dx<=rad; ++dx) {
+      
+      int dist = dx*dx + dy*dy;
+
+      if (b3d.have_pos && dist >= best_dist) {
+	continue;
+      }
+
+      int x = b3d.blob.cx + dx + rect.x;
+      int y = b3d.blob.cy + dy + rect.y;
+      
+      if (x < 0 || x >= (int)pch.msg->width ||
+	  y < 0 || y >= (int)pch.msg->height) {
+	
+	continue;
+	
+      }
+	
+      const float* xyz = pch.xyz(x,y);
+	
+      if (isnan(xyz[2])) { 
+	continue;
+      }
+      
+      b3d.position.x = xyz[0];
+      b3d.position.y = xyz[1];
+      b3d.position.z = xyz[2];
+      b3d.have_pos = true;
+      best_dist = dist;
+      
+    }
+  }
+
+
+
 }
 
 void BlobFinder2::process_image(const cv::Mat& image_bgr, 
@@ -574,7 +652,7 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     return;
   }
 
-  cv::Mat colorflags, cidx_mask, debug_mask, debug_image_bgr;
+  cv::Mat colorflags;
 
   cv::Mat subimage(image_bgr, roi);
 
@@ -600,57 +678,69 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     // TODO: pause image/points sub?
     return;
   }
-  
-  cidx_mask = cv::Mat(subimage.rows, subimage.cols, CV_8U);
 
-  if (num_debug_image_subscribers > 0) {
-    debug_mask = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8U);
-    debug_image_bgr = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
+  cv::Mat cidx_masks_3d, debug_mask, debug_image_bgr;
+  
+  int rows_cols_channels[3] = {
+    subimage.rows,
+    subimage.cols,
+    num_named_colors
+  };
+
+  cidx_masks_3d = cv::Mat(3, rows_cols_channels, CV_8U);
+
+
+  for (int row=0; row<subimage.rows; ++row) {
+    for (int col=0; col<subimage.cols; ++col) {
+      for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
+	int idx[3] = { row, col, cidx };
+	cidx_masks_3d.at<unsigned char>(idx) = ((colorflags.at<unsigned char>(row, col) >> cidx) & 1) ? 255 : 0;
+      }
+    }
   }
 
+  if (lut.mask_blur_sigma > 0.0) {
+ 
+    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
+						  2, rows_cols_channels);
+
+    // clean it up
+    cv::GaussianBlur(cidx_masks_2d, cidx_masks_2d,
+		     cv::Size(0, 0), lut.mask_blur_sigma);
+    
+    // re-binarize after blur
+    cv::threshold(cidx_masks_2d, cidx_masks_2d,
+		  127, 255, cv::THRESH_BINARY);
+   
+
+  }
   
 
-  for (size_t cidx=0; cidx<ColorLUT::numcolors; ++cidx) {
+  if (num_debug_image_subscribers > 0) {
 
-    // skip unused colors
-    if (lut.colornames[cidx] == "") { continue; }
+    cv::Mat debug_image_bgr = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
 
-    // get mask for this channel
-    lut.colorFlagsToMask(colorflags, cidx, cidx_mask);
+    // make debug image
+    for (size_t y=0; y<subimage.rows; ++y) {
+      for (size_t x=0; x<subimage.cols; ++x) {
 
-    if (lut.mask_blur_sigma > 0.0) {
-      
-      // clean it up
-      cv::GaussianBlur(cidx_mask, cidx_mask,
-		       cv::Size(0, 0), lut.mask_blur_sigma);
-      
-      // re-binarize after blur
-      cv::threshold(cidx_mask, cidx_mask,
-		      127, 255, cv::THRESH_BINARY);
-      
-    }
+	for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
 
-    if (num_debug_image_subscribers > 0) {
+	  // skip unused colors
+	  if (lut.colornames[cidx] == "") { continue; }
 
-      for (size_t y=0; y<cidx_mask.rows; ++y) {
-	for (size_t x=0; x<cidx_mask.cols; ++x) {
+	  int idx[3] = { y, x, cidx };
 
-	  if (cidx_mask.at<uint8_t>(y, x) && !debug_mask.at<uint8_t>(y, x)) {
+	  if (cidx_masks_3d.at<uint8_t>(idx)) {
 
-	    debug_mask.at<uint8_t>(y, x) = 255;
-	    debug_image_bgr.at<cv::Vec3b>(y, x) = mean_colors[cidx];
-
-	  }
+	      debug_image_bgr.at<cv::Vec3b>(idx) = mean_colors[cidx];
+	      break;
+	      
+	    }
 	  
 	}
       }
-
     }
-
-
-  }
-
-  if (num_debug_image_subscribers > 0) {
 
     cv_bridge::CvImage cv_img;
     cv_img.image = debug_image_bgr;
@@ -662,6 +752,120 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
 
   }
 
+  if (num_blobs_subscribers || num_blobs3d_subscribers) {
+
+    int rows_cols[2] = { subimage.rows, subimage.cols };
+
+    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
+						  2, rows_cols);
+
+    cv::Mat cidx_mask;
+
+    blobfinder2::MultiBlobInfo blobs_msg;
+    blobs_msg.header.stamp = timestamp;
+
+    blobfinder2::MultiBlobInfo3D blobs3d_msg;
+    blobs3d_msg.header.stamp = timestamp;
+
+    for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
+
+      if (lut.colornames[cidx] == "") { continue; }
+
+      cv::extractChannel(cidx_masks_2d, cidx_mask, cidx);
+
+      ColorLUT::RegionInfoVec regions;
+      lut.getRegionInfo(cidx_mask, regions);
+
+      blobfinder2::ColorBlobInfo color_blob;
+
+      blobfinder2::ColorBlobInfo3D color_blob3d;
+
+      color_blob.color.data = lut.colornames[cidx];
+
+      color_blob3d.color.data = lut.colornames[cidx];
+    
+      for (size_t i=0; i<regions.size(); ++i) {
+
+	if (regions[i].area == 0.0) {
+	  continue;
+	}
+
+	if ( min_blob_area > 0 && regions[i].area < min_blob_area ) {
+	  break;
+	}
+
+	if ( max_blob_count > 0 && (int)i >= max_blob_count ) {
+	  break;
+	}
+      
+	const ColorLUT::RegionInfo& rinfo = regions[i];
+      
+	blobfinder2::BlobInfo binfo;
+      
+	binfo.area = rinfo.area;
+      
+	binfo.cx = rinfo.mean.x;
+	binfo.cy = rinfo.mean.y;
+      
+	binfo.ux = rinfo.b1.x;
+	binfo.uy = rinfo.b1.y;
+      
+	binfo.vy = rinfo.b2.y;
+	binfo.vx = rinfo.b2.x;
+      
+	if (num_blobs_subscribers) {
+	  
+	  color_blob.blobs.push_back(binfo);
+	  
+	}
+
+	if (num_blobs3d_subscribers) {
+
+	  blobfinder2::BlobInfo3D binfo3d;
+	  
+	  binfo3d.blob = binfo;
+	  
+	  if (pch.ok) {
+
+	    get_pos3d(binfo3d, pch);
+
+	  } else {
+
+	    binfo3d.position.x = 0.0;
+	    binfo3d.position.y = 0.0;
+	    binfo3d.position.z = 0.0;
+	  
+	    binfo3d.have_pos = false;
+
+	  }
+
+	  color_blob3d.blobs.push_back(binfo3d);
+	  
+	}
+      
+      }
+
+      if (num_blobs_subscribers) {
+	blobs_msg.color_blobs.push_back(color_blob);
+      }
+
+      if (num_blobs3d_subscribers) {
+	blobs3d_msg.color_blobs.push_back(color_blob3d);
+      }
+      
+    }
+    
+    if (num_blobs_subscribers) {
+      blobs_pub.publish(blobs_msg);
+    }
+
+    if (num_blobs3d_subscribers) {
+      blobs3d_pub.publish(blobs3d_msg);
+    }
+    
+  }
+  
+  
   /*
   for (size_t i=0; i<handlers.size(); ++i) {
     handlers[i]->publish(timestamp, colorflags, pch);
