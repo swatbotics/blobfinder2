@@ -651,14 +651,17 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     return;
   }
 
+  ros::Time timestamp = ros::Time::now();
+
   cv::Mat colorflags;
 
   cv::Mat subimage(image_bgr, roi);
 
   lut.getImageColors(subimage, colorflags);
 
-  ros::Time timestamp = ros::Time::now();
-    
+  ros::Time pre_colorflags_pub = ros::Time::now();
+
+
   if (num_colorflags_subscribers > 0) {
 
     cv_bridge::CvImage cv_img;
@@ -686,17 +689,40 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     num_named_colors
   };
 
+  ros::Time pre_mask_split = ros::Time::now();
+
+
   cidx_masks_3d = cv::Mat(3, rows_cols_channels, CV_8U);
 
+  // split masks
+  {
 
-  for (int row=0; row<subimage.rows; ++row) {
-    for (int col=0; col<subimage.cols; ++col) {
-      for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
-	int idx[3] = { row, col, cidx };
-	cidx_masks_3d.at<unsigned char>(idx) = ((colorflags.at<unsigned char>(row, col) >> cidx) & 1) ? 255 : 0;
-      }
+    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
+						  2, rows_cols_channels);
+
+    cv::Mat cidx_mask;
+    cv::Mat one = cv::Mat::ones(1, 1, CV_8U);
+
+    for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
+
+      // and colorflags with 1 to get channel
+      cv::bitwise_and(colorflags, one, cidx_mask);
+
+      // change 0/1 to 0/255
+      cidx_mask *= 255;
+
+      // divide colorflags by 2 to shift to the right
+      colorflags /= 2;
+
+      // insert into 2d
+      cv::insertChannel(cidx_mask, cidx_masks_2d, cidx);
+      
+      
     }
+
   }
+
+  ros::Time pre_cleanup = ros::Time::now();
 
   if (lut.mask_blur_sigma > 0.0) {
  
@@ -713,32 +739,28 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
    
 
   }
-  
+
+  ros::Time pre_debug_image = ros::Time::now();
 
   if (num_debug_image_subscribers > 0) {
 
     cv::Mat debug_image_bgr = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
 
-    // make debug image
-    for (size_t y=0; y<subimage.rows; ++y) {
-      for (size_t x=0; x<subimage.cols; ++x) {
+    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
+						  2, rows_cols_channels);
 
-	for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
+    cv::Mat cidx_mask;
 
-	  // skip unused colors
-	  if (lut.colornames[cidx] == "") { continue; }
+    for (size_t i=0; i<num_named_colors; ++i) {
 
-	  int idx[3] = { y, x, cidx };
+      size_t cidx = num_named_colors - i - 1;
 
-	  if (cidx_masks_3d.at<uint8_t>(idx)) {
+      cv::extractChannel(cidx_masks_2d, cidx_mask, cidx);
 
-	      debug_image_bgr.at<cv::Vec3b>(idx) = mean_colors[cidx];
-	      break;
-	      
-	    }
-	  
-	}
-      }
+      cv::Mat color = cv::Mat(3, 1, CV_8U, mean_colors + cidx);
+
+      debug_image_bgr.setTo(color, cidx_mask);
+      
     }
 
     cv_bridge::CvImage cv_img;
@@ -750,6 +772,8 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     debug_image_pub.publish(msg);
 
   }
+
+  ros::Time pre_blob = ros::Time::now();
 
   if (num_blobs_subscribers || num_blobs3d_subscribers) {
 
@@ -863,8 +887,17 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     }
     
   }
+
+  ros::Time finish = ros::Time::now();
+
+  fprintf(stderr, "  get flags:      %.4fs\n", (pre_colorflags_pub - timestamp).toSec());
+  fprintf(stderr, "  mask split:     %.4fs\n", (pre_cleanup-pre_mask_split).toSec());
+  fprintf(stderr, "  cleanup:        %.4fs\n", (pre_debug_image-pre_cleanup).toSec());
+  fprintf(stderr, "  debug image:    %.4fs\n", (pre_blob-pre_debug_image).toSec());
+  fprintf(stderr, "  blob message:   %.4fs\n", (finish-pre_blob).toSec());
+  fprintf(stderr, "total processing: %.4fs\n\n", (finish-timestamp).toSec());
   
-  
+
   /*
   for (size_t i=0; i<handlers.size(); ++i) {
     handlers[i]->publish(timestamp, colorflags, pch);
