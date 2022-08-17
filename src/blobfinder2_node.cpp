@@ -2,7 +2,6 @@
 //
 // config/arguments:
 //   - input image (eg /camera/bgr/image_raw)
-//   - dilation/erosion amount (default 1)
 //   - ROI (default whole window, otherwise x,y,w,h)
 //   - minimum blob size (default 1)
 //   - # blobs
