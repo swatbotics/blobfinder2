@@ -661,7 +661,6 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
 
   ros::Time pre_colorflags_pub = ros::Time::now();
 
-
   if (num_colorflags_subscribers > 0) {
 
     cv_bridge::CvImage cv_img;
@@ -681,132 +680,66 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
     return;
   }
 
-  cv::Mat cidx_masks_3d, debug_mask, debug_image_bgr;
-  
-  int rows_cols_channels[3] = {
-    subimage.rows,
-    subimage.cols,
-    num_named_colors
-  };
-
-  ros::Time pre_mask_split = ros::Time::now();
-
-
-  cidx_masks_3d = cv::Mat(3, rows_cols_channels, CV_8U);
-
-  // split masks
-  {
-
-    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
-						  2, rows_cols_channels);
-
-    cv::Mat cidx_mask;
-    cv::Mat one = cv::Mat::ones(1, 1, CV_8U);
-
-    for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
-
-      // and colorflags with 1 to get channel
-      cv::bitwise_and(colorflags, one, cidx_mask);
-
-      // change 0/1 to 0/255
-      cidx_mask *= 255;
-
-      // divide colorflags by 2 to shift to the right
-      colorflags /= 2;
-
-      // insert into 2d
-      cv::insertChannel(cidx_mask, cidx_masks_2d, cidx);
-      
-      
-    }
-
-  }
-
-  ros::Time pre_cleanup = ros::Time::now();
-
-  if (lut.mask_blur_sigma > 0.0) {
- 
-    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
-						  2, rows_cols_channels);
-
-    // clean it up
-    cv::GaussianBlur(cidx_masks_2d, cidx_masks_2d,
-		     cv::Size(0, 0), lut.mask_blur_sigma);
-    
-    // re-binarize after blur
-    cv::threshold(cidx_masks_2d, cidx_masks_2d,
-		  127, 255, cv::THRESH_BINARY);
-   
-
-  }
-
-  ros::Time pre_debug_image = ros::Time::now();
+  cv::Mat debug_image_bgr;
 
   if (num_debug_image_subscribers > 0) {
 
-    cv::Mat debug_image_bgr = cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
-
-    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
-						  2, rows_cols_channels);
-
-    cv::Mat cidx_mask;
-
-    for (size_t i=0; i<num_named_colors; ++i) {
-
-      size_t cidx = num_named_colors - i - 1;
-
-      cv::extractChannel(cidx_masks_2d, cidx_mask, cidx);
-
-      cv::Mat color = cv::Mat(3, 1, CV_8U, mean_colors + cidx);
-
-      debug_image_bgr.setTo(color, cidx_mask);
-      
-    }
-
-    cv_bridge::CvImage cv_img;
-    cv_img.image = debug_image_bgr;
-    cv_img.encoding = BGR8;
-    sensor_msgs::ImagePtr msg = cv_img.toImageMsg();
-    msg->header.stamp = timestamp;
-
-    debug_image_pub.publish(msg);
+    debug_image_bgr =
+      cv::Mat::zeros(subimage.rows, subimage.cols, CV_8UC3);
 
   }
 
-  ros::Time pre_blob = ros::Time::now();
+  blobfinder2::MultiBlobInfo blobs_msg;
+  blobs_msg.header.stamp = timestamp;
 
-  if (num_blobs_subscribers || num_blobs3d_subscribers) {
+  blobfinder2::MultiBlobInfo3D blobs3d_msg;
+  blobs3d_msg.header.stamp = timestamp;
+  
+  cv::Mat cidx_mask;
+  
+  cv::Mat one = cv::Mat::ones(1, 1, CV_8U);
+  
+  for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
 
-    int rows_cols[2] = { subimage.rows, subimage.cols };
+    if (lut.colornames[cidx] == "") {
+      colorflags /= 2;
+      continue;
+    }
 
-    cv::Mat cidx_masks_2d = cidx_masks_3d.reshape(num_named_colors,
-						  2, rows_cols);
+    cv::bitwise_and(colorflags, one, cidx_mask);
+    cidx_mask *= 255;
+    colorflags /= 2;
 
-    cv::Mat cidx_mask;
+    if (lut.mask_blur_sigma > 0.0) {
 
-    blobfinder2::MultiBlobInfo blobs_msg;
-    blobs_msg.header.stamp = timestamp;
+      cv::GaussianBlur(cidx_mask, cidx_mask,
+		       cv::Size(0, 0), lut.mask_blur_sigma);
+    
+      // re-binarize after blur
+      cv::threshold(cidx_mask, cidx_mask,
+		    127, 255, cv::THRESH_BINARY);
 
-    blobfinder2::MultiBlobInfo3D blobs3d_msg;
-    blobs3d_msg.header.stamp = timestamp;
+    }
 
-    for (size_t cidx=0; cidx<num_named_colors; ++cidx) {
+    if (num_debug_image_subscribers) {
 
-      if (lut.colornames[cidx] == "") { continue; }
+      cv::Mat color = cv::Mat(3, 1, CV_8U, mean_colors + cidx);
+    
+      debug_image_bgr.setTo(color, cidx_mask);
 
-      cv::extractChannel(cidx_masks_2d, cidx_mask, cidx);
+    }
+
+    if (num_blobs_subscribers || num_blobs3d_subscribers) {
 
       ColorLUT::RegionInfoVec regions;
       lut.getRegionInfo(cidx_mask, regions);
 
       blobfinder2::ColorBlobInfo color_blob;
-
       blobfinder2::ColorBlobInfo3D color_blob3d;
 
       color_blob.color.data = lut.colornames[cidx];
-
       color_blob3d.color.data = lut.colornames[cidx];
-    
+      
       for (size_t i=0; i<regions.size(); ++i) {
 
 	if (regions[i].area == 0.0) {
@@ -877,32 +810,38 @@ void BlobFinder2::process_image(const cv::Mat& image_bgr,
       }
       
     }
-    
-    if (num_blobs_subscribers) {
-      blobs_pub.publish(blobs_msg);
-    }
 
-    if (num_blobs3d_subscribers) {
-      blobs3d_pub.publish(blobs3d_msg);
-    }
-    
   }
-
-  ros::Time finish = ros::Time::now();
-
-  fprintf(stderr, "  get flags:      %.4fs\n", (pre_colorflags_pub - timestamp).toSec());
-  fprintf(stderr, "  mask split:     %.4fs\n", (pre_cleanup-pre_mask_split).toSec());
-  fprintf(stderr, "  cleanup:        %.4fs\n", (pre_debug_image-pre_cleanup).toSec());
-  fprintf(stderr, "  debug image:    %.4fs\n", (pre_blob-pre_debug_image).toSec());
-  fprintf(stderr, "  blob message:   %.4fs\n", (finish-pre_blob).toSec());
-  fprintf(stderr, "total processing: %.4fs\n\n", (finish-timestamp).toSec());
   
+  if (num_debug_image_subscribers) {
 
-  /*
-  for (size_t i=0; i<handlers.size(); ++i) {
-    handlers[i]->publish(timestamp, colorflags, pch);
+    cv_bridge::CvImage cv_img;
+    cv_img.image = debug_image_bgr;
+    cv_img.encoding = BGR8;
+    sensor_msgs::ImagePtr msg = cv_img.toImageMsg();
+    msg->header.stamp = timestamp;
+
+    debug_image_pub.publish(msg);
+
   }
-  */
+
+  if (num_blobs_subscribers) {
+    blobs_pub.publish(blobs_msg);
+  }
+  
+  if (num_blobs3d_subscribers) {
+    blobs3d_pub.publish(blobs3d_msg);
+  }
+
+  if (false) {
+    
+    ros::Time finish = ros::Time::now();
+    
+    fprintf(stderr, "total processing: %.4fs\n\n",
+	    (finish-timestamp).toSec());
+
+  }
+
 
 }
 
