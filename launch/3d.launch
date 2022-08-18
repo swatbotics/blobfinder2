@@ -1,0 +1,40 @@
+<!-- -*- mode: xml -*- -->
+<!-- (above line gets Emacs to recognize this as an XML file) -->
+
+<launch>
+
+  <!-- 
+     Data file to load for blob finding.  This file holds the
+     colors being tracked.  You can use the colorpicker program
+     to generate one.
+    -->
+  <param name="/blobfinder2/datafile" type="string" 
+	 value="$(find blobfinder2)/datasets/$(env TURTLEBOT_3D_SENSOR)/colorlut2.data" />
+
+  <!-- 
+     Set this to true to use a PointCloud2 message as input instead of
+     an Image message (i.e., to use the 3D data from the Kinect).
+    -->
+  <param name="/blobfinder2/use_points" type="bool" value="true" />
+
+  <!-- 
+     Set this to the name of the PointCloud2 message being used
+     (use_points must be set to true).
+    -->
+  <remap from="points" to="/camera/depth_registered/points" />
+
+  <!-- 
+     Minimum area of blobs to be reported.  Setting this larger
+     than zero is helpful for discarding small blobs.
+    -->
+  <param name="/blobfinder2/min_blob_area" type="int" value="32"/>
+
+  <!-- 
+     Note: you can use all of the other parameters documented
+     in 2d.launch!
+    -->
+
+  <!-- Launch the blobfinder node. -->
+  <node name="blobfinder2_node" pkg="blobfinder2" type="blobfinder2_node" />
+
+</launch>

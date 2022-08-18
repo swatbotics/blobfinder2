@@ -1,0 +1,75 @@
+<!-- -*- mode: xml -*- -->
+<!-- (above line gets Emacs to recognize this as an XML file) -->
+
+<launch>
+
+  <!-- 
+     Data file to load for blob finding.  This file holds the
+     colors being tracked.  You can use the colorpicker program
+     to generate one.
+    -->
+  <param name="/blobfinder2/datafile" type="string" 
+	 value="$(find blobfinder2)/datasets/$(env TURTLEBOT_3D_SENSOR)/colorlut2.data" />
+
+  <!-- 
+     Set the "to" attribute here to whatever image you would
+     like to analyze. For instance, to use the image from 
+     the Kinect, set to /camera/rgb/image_raw
+    -->
+  <remap from="image" to="/camera/rgb/image_raw" />
+ 
+  <!-- 
+     Set this to true to use a PointCloud2 message as input instead of
+     an Image message (i.e., to use the 3D data from the Kinect).
+    -->
+  <param name="/blobfinder2/use_points" type="bool" value="false" />
+
+  <!-- 
+     X (left) coordinate of Region-of-Interest window. 
+
+     Negative numbers will index from the right side, 
+     so setting -100 on an image of width 640 would be the
+     same as setting to 540.
+    -->
+  <param name="/blobfinder2/roi_x" type="int" value="0"/>
+
+  <!-- 
+     Y (top) coordinate of Region-of-Interest window. 
+
+     Negative numbers will index from the bottom side, 
+     so setting -100 on an image of height 480 would be the
+     same as setting to 380.
+    -->
+  <param name="/blobfinder2/roi_y" type="int" value="0"/>
+
+  <!--
+     Width of the region of interest. Setting to zero
+     is equivalent to automatically setting the right
+     hand side of the ROI to the right side of the image.
+    -->
+  <param name="/blobfinder2/roi_w" type="int" value="0"/>
+
+  <!--
+     Height of the region of interest. Setting to zero
+     is equivalent to automatically setting the bottom
+     side of the ROI to the bottom the image.
+    -->
+  <param name="/blobfinder2/roi_h" type="int" value="0"/>
+
+  <!-- 
+     Minimum area of blobs to be reported.  Setting this larger
+     than zero is helpful for discarding small blobs.
+    -->
+  <param name="/blobfinder2/min_blob_area" type="int" value="32"/>
+
+  <!-- 
+     Maximum number of blobs per color to return (0 = return all). Since
+     blobs are sorted by area (from largest to smallest, setting
+     this to 1 will return only the largest blob per color in the scene.
+    -->
+  <param name="/blobfinder2/max_blob_count" type="int" value="0"/>
+
+  <!-- Finally, launch the blobfinder node. -->
+  <node name="blobfinder2_node" pkg="blobfinder2" type="blobfinder2_node" />
+
+</launch>
