@@ -1151,6 +1151,7 @@ class LearnGUI:
 
             if k == ord('l') or k == ord('L'):
                 self.train()
+                redraw = True
 
             # mode changing
             
