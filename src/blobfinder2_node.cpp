@@ -575,13 +575,13 @@ void BlobFinder2::setROI(int w, int h) {
 void BlobFinder2::subs_inc(size_t& count,
 			   const ros::SingleSubscriberPublisher& _) {
   ++count;
-  fprintf(stderr, "after subs_inc, count is %d\n", (int)count);
+  //fprintf(stderr, "after subs_inc, count is %d\n", (int)count);
 }
 
 void BlobFinder2::subs_dec(size_t& count,
 			   const ros::SingleSubscriberPublisher& _) {
   if (count) { --count; }
-  fprintf(stderr, "after subs_dec, count is %d\n", (int)count);
+  //fprintf(stderr, "after subs_dec, count is %d\n", (int)count);
 }
 
 

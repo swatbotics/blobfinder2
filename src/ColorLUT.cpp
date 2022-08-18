@@ -195,11 +195,7 @@ static float str2float(const std::string& str) {
 
   char* endptr = 0;
 
-  fprintf(stderr, "parsing float %s", str.c_str());
-
   float rval = strtof(str.c_str(), &endptr);
-
-  fprintf(stderr, "got result %f with endptr=%p value %d", rval, endptr, endptr ? *endptr : -1);
 
   if (!endptr || *endptr) {
     throw std::runtime_error("error parsing float");
